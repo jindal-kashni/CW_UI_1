@@ -22,6 +22,25 @@ export function AdminScreenScaffold({
   const pathname = usePathname();
   const inAdminTabs = segments[0] === '(admin-tabs)';
   const showBack = !inAdminTabs && pathname.startsWith('/admin/');
+  const handleAdminBack = React.useCallback(() => {
+    if (pathname === '/admin/update-password') {
+      router.replace('/admin/profile' as any);
+      return;
+    }
+    if (pathname.startsWith('/admin/locations')) {
+      router.replace('/admin/locations' as any);
+      return;
+    }
+    if (pathname.startsWith('/admin/reports')) {
+      router.replace('/(admin-tabs)/reports' as any);
+      return;
+    }
+    if (pathname.startsWith('/admin/assets')) {
+      router.replace('/(admin-tabs)/assets' as any);
+      return;
+    }
+    router.replace('/(admin-tabs)/more' as any);
+  }, [pathname]);
 
   const content = (
     <View
@@ -44,7 +63,7 @@ export function AdminScreenScaffold({
         title={title}
         userName="Admin"
         onPressUser={() => router.push('/admin/profile' as any)}
-        onPressBack={showBack ? () => router.back() : undefined}
+        onPressBack={showBack ? handleAdminBack : undefined}
       />
       {scroll ? (
         <ScrollView

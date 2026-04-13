@@ -35,6 +35,18 @@ export default function AdminTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="audits"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+        }}
+      />
+      <Tabs.Screen
         name="more"
         options={{
           title: 'More',

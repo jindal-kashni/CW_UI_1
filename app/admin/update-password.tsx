@@ -27,11 +27,20 @@ export default function AdminUpdatePasswordPage() {
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           <Button
             label="Save changes"
-            onPress={!current || !next || !confirm || mismatch ? undefined : () => router.back()}
+            onPress={
+              !current || !next || !confirm || mismatch
+                ? undefined
+                : () => router.replace('/admin/profile' as any)
+            }
             variant={!current || !next || !confirm || mismatch ? 'secondary' : 'primary'}
             style={{ flex: 1 }}
           />
-          <Button label="Cancel" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
+          <Button
+            label="Cancel"
+            variant="secondary"
+            onPress={() => router.replace('/admin/profile' as any)}
+            style={{ flex: 1 }}
+          />
         </View>
       </View>
     </AdminScreenScaffold>

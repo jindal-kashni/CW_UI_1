@@ -35,7 +35,7 @@ export default function AdminCreateAssetPage() {
       <TopBar
         title="Create Asset"
         userName="Admin"
-        onPressBack={() => router.back()}
+        onPressBack={() => router.replace('/(admin-tabs)/assets' as any)}
         onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
@@ -127,7 +127,12 @@ export default function AdminCreateAssetPage() {
 
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
             <Button label="Save asset" onPress={() => router.replace('/(admin-tabs)/assets' as any)} style={{ flex: 1 }} />
-            <Button label="Cancel" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
+            <Button
+              label="Cancel"
+              variant="secondary"
+              onPress={() => router.replace('/(admin-tabs)/assets' as any)}
+              style={{ flex: 1 }}
+            />
           </View>
         </View>
       </ScrollView>

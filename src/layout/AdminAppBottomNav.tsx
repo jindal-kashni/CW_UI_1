@@ -6,16 +6,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/src/theme';
 
 const items = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', href: '/(admin-tabs)' },
-  { key: 'reports', label: 'Reports', icon: 'check-square-o', href: '/(admin-tabs)/reports' },
-  { key: 'assets', label: 'Assets', icon: 'th-large', href: '/(admin-tabs)/assets' },
-  { key: 'more', label: 'More', icon: 'ellipsis-h', href: '/(admin-tabs)/more' },
+  { key: 'dashboard', label: 'Dashboard', icon: 'tachometer', href: '/(admin-tabs)' },
+  { key: 'reports', label: 'Reports', icon: 'file-text-o', href: '/(admin-tabs)/reports' },
+  { key: 'assets', label: 'Assets', icon: 'cubes', href: '/(admin-tabs)/assets' },
+  { key: 'settings', label: 'Settings', icon: 'cog', href: '/(admin-tabs)/settings' },
+  { key: 'more', label: 'More', icon: 'sliders', href: '/(admin-tabs)/more' },
 ] as const;
 
 function isActive(pathname: string, key: (typeof items)[number]['key']) {
   if (key === 'dashboard') return pathname === '/(admin-tabs)' || pathname === '/(admin-tabs)/index';
   if (key === 'reports') return pathname.includes('/reports') || pathname.includes('/admin/reports');
   if (key === 'assets') return pathname.includes('/assets') || pathname.includes('/admin/assets');
+  if (key === 'settings') return pathname.includes('/settings');
   if (key === 'more')
     return (
       pathname.includes('/more') ||
@@ -23,7 +25,6 @@ function isActive(pathname: string, key: (typeof items)[number]['key']) {
       pathname.includes('/admin/locations') ||
       pathname.includes('/admin/rooms') ||
       pathname.includes('/admin/departments') ||
-      pathname.includes('/admin/settings') ||
       pathname.includes('/admin/profile') ||
       pathname.includes('/admin/sync-status') ||
       pathname.includes('/admin/reference-data')

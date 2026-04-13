@@ -11,6 +11,7 @@ const iconByRoute: Record<string, IconName> = {
   index: 'tachometer',
   reports: 'file-text-o',
   assets: 'cubes',
+  settings: 'cog',
   alerts: 'bell-o',
   more: 'sliders',
 };
@@ -19,6 +20,7 @@ const labelByRoute: Record<string, string> = {
   index: 'Dashboard',
   reports: 'Reports',
   assets: 'Assets',
+  settings: 'Settings',
   alerts: 'Alerts',
   more: 'More',
 };
@@ -39,7 +41,9 @@ export function AdminBottomNavBar({ state, navigation }: BottomTabBarProps) {
           paddingBottom: t.spacing.md,
         }}>
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-          {state.routes.filter((route) => route.name !== 'alerts').map((route) => {
+          {state.routes
+            .filter((route) => !['alerts', 'audits'].includes(route.name))
+            .map((route) => {
             const idx = state.routes.findIndex((item) => item.key === route.key);
             const focused = state.index === idx;
             const icon = iconByRoute[route.name] ?? 'circle';
@@ -89,7 +93,7 @@ export function AdminBottomNavBar({ state, navigation }: BottomTabBarProps) {
                 </Text>
               </Pressable>
             );
-          })}
+            })}
         </View>
       </View>
     </SafeAreaView>

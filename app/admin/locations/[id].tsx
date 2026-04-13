@@ -17,7 +17,7 @@ export default function AdminLocationDetailPage() {
         <TopBar
           title="Location Detail"
           userName="Admin"
-          onPressBack={() => router.back()}
+          onPressBack={() => router.replace('/admin/locations' as any)}
           onPressUser={() => router.push('/admin/profile' as any)}
         />
         <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
@@ -46,7 +46,7 @@ export default function AdminLocationDetailPage() {
       <TopBar
         title="Location Detail"
         userName="Admin"
-        onPressBack={() => router.back()}
+        onPressBack={() => router.replace('/admin/locations' as any)}
         onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView

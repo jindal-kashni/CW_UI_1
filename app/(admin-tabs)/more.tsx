@@ -9,7 +9,7 @@ const items = [
   { label: 'Rooms', href: '/admin/rooms' },
   { label: 'Departments', href: '/admin/departments' },
   { label: 'Users', href: '/admin/users' },
-  { label: 'Settings', href: '/admin/settings' },
+  { label: 'Settings', href: '/(admin-tabs)/settings' },
   { label: 'Profile', href: '/admin/profile' },
   { label: 'Sync Status', href: '/admin/sync-status' },
   { label: 'Reference Data', href: '/admin/reference-data' },
