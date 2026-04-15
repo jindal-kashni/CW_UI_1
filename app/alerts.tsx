@@ -2,11 +2,12 @@ import React from 'react';
 import { router } from 'expo-router';
 import { ScrollView, Text, View } from 'react-native';
 import { AlertListItem, EmptyState, FilterChip } from '@/src/components';
+import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 
-export default function AlertsInboxScreen() {
+function AlertsInboxContent() {
   const t = useTheme();
   const [filter, setFilter] = React.useState<'All' | 'Unread' | 'Urgent' | 'Completed'>('All');
   const { alerts, completeAlert } = useDemoState();
@@ -65,6 +66,14 @@ export default function AlertsInboxScreen() {
       </ScrollView>
       <AppBottomNav />
     </ScreenContainer>
+  );
+}
+
+export default function AlertsInboxScreen() {
+  return (
+    <RequireWorkspace role="auditor">
+      <AlertsInboxContent />
+    </RequireWorkspace>
   );
 }
 

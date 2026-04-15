@@ -10,6 +10,8 @@ import 'react-native-reanimated';
 
 import { AppThemeProvider, colors } from '@/src/theme';
 import { DemoStateProvider } from '@/src/state/DemoStateProvider';
+import { AuthRedirect } from '@/src/navigation/AuthRedirect';
+import { WorkspaceProvider } from '@/src/state/WorkspaceProvider';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -63,27 +65,20 @@ function RootLayoutNav() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <DemoStateProvider>
-        <AppThemeProvider>
-          <ThemeProvider value={navigationTheme}>
-            <StatusBar style="light" />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="index" options={{ headerShown: false }} />
-              <Stack.Screen name="(admin-tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="admin-dashboard" options={{ headerShown: false }} />
-              <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="profile" options={{ headerShown: false }} />
-              <Stack.Screen name="update-password" options={{ headerShown: false }} />
-              <Stack.Screen name="alerts" options={{ headerShown: false }} />
-              <Stack.Screen name="alerts/[id]" options={{ headerShown: false }} />
-              <Stack.Screen name="audit/report/[historyId]" options={{ headerShown: false }} />
-              <Stack.Screen name="audit/structured-form" options={{ headerShown: false }} />
-              <Stack.Screen name="modal" options={{ presentation: 'modal', headerShown: true }} />
-            </Stack>
-          </ThemeProvider>
-        </AppThemeProvider>
-      </DemoStateProvider>
+      <WorkspaceProvider>
+        <AuthRedirect />
+        <DemoStateProvider>
+          <AppThemeProvider>
+            <ThemeProvider value={navigationTheme}>
+              <StatusBar style="light" />
+              {/* File-based routes are registered automatically; only override screens that need special options. */}
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="modal" options={{ presentation: 'modal', headerShown: true }} />
+              </Stack>
+            </ThemeProvider>
+          </AppThemeProvider>
+        </DemoStateProvider>
+      </WorkspaceProvider>
     </GestureHandlerRootView>
   );
 }

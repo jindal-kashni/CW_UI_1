@@ -2,11 +2,12 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, StatusBadge } from '@/src/components';
+import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 
-export default function OfflineSyncScreen() {
+function OfflineSyncContent() {
   const t = useTheme();
   const { sync: syncItems } = useDemoState();
 
@@ -65,6 +66,14 @@ export default function OfflineSyncScreen() {
       </View>
       <AppBottomNav />
     </ScreenContainer>
+  );
+}
+
+export default function OfflineSyncScreen() {
+  return (
+    <RequireWorkspace role="auditor">
+      <OfflineSyncContent />
+    </RequireWorkspace>
   );
 }
 

@@ -26,9 +26,9 @@ export function FormField({
       <View
         style={{
           borderRadius: t.radius.lg,
-          backgroundColor: t.colors.card.surface,
+          backgroundColor: editable ? t.colors.card.surface : t.colors.card.surfaceAlt,
           borderWidth: 1,
-          borderColor: hasError ? '#B63E34' : t.colors.border.subtle,
+          borderColor: hasError ? '#B63E34' : editable ? t.colors.border.subtle : 'rgba(30,31,28,0.22)',
           paddingHorizontal: t.spacing.md,
           paddingVertical: multiline ? t.spacing.sm : 12,
         }}>
@@ -40,7 +40,7 @@ export function FormField({
           editable={editable}
           style={{
             fontSize: 16,
-            color: t.colors.text.primary,
+            color: editable ? t.colors.text.primary : t.colors.text.secondary,
             minHeight: multiline ? 96 : undefined,
             textAlignVertical: multiline ? 'top' : 'center',
           }}

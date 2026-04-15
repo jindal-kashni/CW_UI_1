@@ -30,7 +30,7 @@ export default function AdminUpdatePasswordPage() {
             onPress={
               !current || !next || !confirm || mismatch
                 ? undefined
-                : () => router.replace('/admin/profile' as any)
+                : () => router.replace('/(admin)/profile' as any)
             }
             variant={!current || !next || !confirm || mismatch ? 'secondary' : 'primary'}
             style={{ flex: 1 }}
@@ -38,7 +38,7 @@ export default function AdminUpdatePasswordPage() {
           <Button
             label="Cancel"
             variant="secondary"
-            onPress={() => router.replace('/admin/profile' as any)}
+            onPress={() => router.replace('/(admin)/profile' as any)}
             style={{ flex: 1 }}
           />
         </View>

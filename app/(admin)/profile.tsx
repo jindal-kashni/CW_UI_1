@@ -3,17 +3,15 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { FormField } from '@/src/components';
-import { currentUser } from '@/src/data';
-import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
-import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
+import { ScreenContainer, TopBar } from '@/src/layout';
 import { useWorkspace } from '@/src/state/WorkspaceProvider';
 import { useTheme } from '@/src/theme';
 
-function AuditorProfileContent() {
+export default function AdminProfileTabScreen() {
   const t = useTheme();
   const { logout } = useWorkspace();
-  const [displayName, setDisplayName] = React.useState(currentUser.name);
-  const [email, setEmail] = React.useState('auditor@currumbinsanctuary.internal');
+  const [displayName, setDisplayName] = React.useState('Admin');
+  const [email, setEmail] = React.useState('admin@currumbinsanctuary.internal');
   const SectionHeading = ({ title }: { title: string }) => (
     <Text style={[t.text.title, { fontSize: 26, lineHeight: 32, marginBottom: t.spacing.md }]}>{title}</Text>
   );
@@ -31,7 +29,7 @@ function AuditorProfileContent() {
 
   return (
     <ScreenContainer>
-      <TopBar title="Profile" userName={currentUser.name} onPressBack={() => router.back()} />
+      <TopBar title="Profile" userName="Admin" onPressBack={() => router.replace('/(admin)/more' as any)} />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -55,9 +53,7 @@ function AuditorProfileContent() {
                 alignItems: 'center',
                 justifyContent: 'center',
               }}>
-              <Text style={{ color: t.colors.brand.forest, fontWeight: '800', fontSize: 34 }}>
-                {currentUser.initials}
-              </Text>
+              <Text style={{ color: t.colors.brand.forest, fontWeight: '800', fontSize: 34 }}>A</Text>
               <Pressable
                 onPress={() => {}}
                 style={({ pressed }) => [
@@ -99,7 +95,7 @@ function AuditorProfileContent() {
                 <Text style={{ color: t.colors.text.muted, fontSize: 16 }}>************</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Pressable onPress={() => router.push('/update-password' as any)} hitSlop={8}>
+                <Pressable onPress={() => router.push('/admin/update-password' as any)} hitSlop={8}>
                   <Text style={{ color: t.colors.brand.forest, fontWeight: '700' }}>Change password</Text>
                 </Pressable>
               </View>
@@ -116,9 +112,7 @@ function AuditorProfileContent() {
                   minHeight: 50,
                   justifyContent: 'center',
                 }}>
-                <Text style={{ color: t.colors.text.muted, fontSize: 16 }}>
-                  {currentUser.role} (Admin managed)
-                </Text>
+                <Text style={{ color: t.colors.text.muted, fontSize: 16 }}>Admin (Admin managed)</Text>
               </View>
             </View>
           </View>
@@ -147,16 +141,7 @@ function AuditorProfileContent() {
           </Pressable>
         </View>
       </ScrollView>
-      <AppBottomNav />
     </ScreenContainer>
-  );
-}
-
-export default function ProfileScreen() {
-  return (
-    <RequireWorkspace role="auditor">
-      <AuditorProfileContent />
-    </RequireWorkspace>
   );
 }
 

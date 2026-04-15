@@ -22,7 +22,7 @@ const labelByRoute: Record<string, string> = {
   assets: 'Assets',
   settings: 'Settings',
   alerts: 'Alerts',
-  more: 'More',
+  more: 'Admin',
 };
 
 export function AdminBottomNavBar({ state, navigation }: BottomTabBarProps) {
@@ -42,7 +42,7 @@ export function AdminBottomNavBar({ state, navigation }: BottomTabBarProps) {
         }}>
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           {state.routes
-            .filter((route) => !['alerts', 'audits'].includes(route.name))
+            .filter((route) => !['alerts', 'audits', 'profile'].includes(route.name))
             .map((route) => {
             const idx = state.routes.findIndex((item) => item.key === route.key);
             const focused = state.index === idx;

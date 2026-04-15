@@ -1,16 +1,17 @@
 import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { usePathname, useSegments, router } from 'expo-router';
+import { usePathname, router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/src/theme';
 
-const items = (base: '/(tabs)' | '/(admin-tabs)') =>
-  [
-    { key: 'audits', label: 'Your Reports', icon: 'check-square-o', href: `${base}/audits` },
-    { key: 'assets', label: 'Assets', icon: 'th-large', href: `${base}/assets` },
-    { key: 'settings', label: 'Settings', icon: 'cog', href: `${base}/settings` },
-  ] as const;
+/** Auditor workspace tab bar only (separate from admin app). */
+const AUDITOR_BASE = '/(auditor)' as const;
+const items = [
+  { key: 'audits', label: 'Your Reports', icon: 'check-square-o', href: `${AUDITOR_BASE}/audits` },
+  { key: 'assets', label: 'Assets', icon: 'th-large', href: `${AUDITOR_BASE}/assets` },
+  { key: 'settings', label: 'Settings', icon: 'cog', href: `${AUDITOR_BASE}/settings` },
+] as const;
 
 function isActive(pathname: string, key: 'audits' | 'assets' | 'settings') {
   if (key === 'assets') return pathname.includes('/assets') && !pathname.includes('/alerts');
@@ -22,9 +23,7 @@ function isActive(pathname: string, key: 'audits' | 'assets' | 'settings') {
 export function AppBottomNav() {
   const t = useTheme();
   const pathname = usePathname();
-  const segments = useSegments();
-  const base = segments[0] === '(admin-tabs)' ? '/(admin-tabs)' : '/(tabs)';
-  const navItems = items(base);
+  const navItems = items;
   const headerGreen = '#004A26';
   const navBg = '#F7F6F2';
   const activePill = 'rgba(0,74,38,0.10)';

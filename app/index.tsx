@@ -10,25 +10,29 @@ import {
   View,
 } from 'react-native';
 import { useTheme } from '@/src/theme';
+import { useWorkspace } from '@/src/state/WorkspaceProvider';
 
 export default function LoginScreen() {
   const t = useTheme();
+  const { setRole, signOutMessage, clearSignOutMessage } = useWorkspace();
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
-  const [refCode, setRefCode] = React.useState('');
   const [remember, setRemember] = React.useState(true);
   const [roleError, setRoleError] = React.useState('');
 
   const onSignIn = () => {
+    clearSignOutMessage();
     const roleInput = email.trim().toLowerCase();
     if (roleInput.includes('admin')) {
       setRoleError('');
-      router.replace('/(admin-tabs)' as any);
+      setRole('admin');
+      router.replace('/(admin)' as any);
       return;
     }
     if (roleInput.includes('audit') || roleInput.includes('auditor')) {
       setRoleError('');
-      router.replace('/(tabs)/audits' as any);
+      setRole('auditor');
+      router.replace('/(auditor)/audits' as any);
       return;
     }
     setRoleError('Enter "admin" for Admin workspace or "audit" for Auditor workspace.');
@@ -53,6 +57,23 @@ export default function LoginScreen() {
           <Text style={[t.text.caption, { marginTop: 10, fontSize: 16, lineHeight: 22 }]}>
             Sign in to manage sanctuary assets
           </Text>
+
+          {signOutMessage ? (
+            <View
+              style={{
+                marginTop: 16,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+                borderRadius: 12,
+                backgroundColor: 'rgba(47,107,75,0.12)',
+                borderWidth: 1,
+                borderColor: 'rgba(47,107,75,0.35)',
+              }}
+              accessibilityRole="text"
+              accessibilityLiveRegion="polite">
+              <Text style={{ color: '#2F5B45', fontWeight: '700', fontSize: 15, lineHeight: 20 }}>{signOutMessage}</Text>
+            </View>
+          ) : null}
 
           <View style={{ marginTop: 30, gap: 14 }}>
             <Text style={[t.text.caption, { color: t.colors.text.secondary, fontWeight: '700', fontSize: 15 }]}>Username or email</Text>
@@ -153,54 +174,6 @@ export default function LoginScreen() {
           {roleError ? (
             <Text style={[t.text.caption, { color: '#B63E34', marginTop: t.spacing.sm }]}>{roleError}</Text>
           ) : null}
-
-          <View style={{ marginTop: 26, gap: 12 }}>
-            <Text style={[t.text.caption, { color: t.colors.text.secondary, fontWeight: '700', fontSize: 15 }]}>
-              Referral Code
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <View
-                style={{
-                  flex: 1,
-                  borderRadius: 14,
-                  backgroundColor: '#E1E5DE',
-                  borderWidth: 1,
-                  borderColor: 'rgba(30, 31, 28, 0.06)',
-                  paddingHorizontal: 14,
-                  minHeight: 56,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
-                }}>
-                <TextInput
-                  value={refCode}
-                  onChangeText={setRefCode}
-                  placeholder="Enter code"
-                  placeholderTextColor={t.colors.text.muted}
-                  style={{ flex: 1, fontSize: 16, color: t.colors.text.primary }}
-                />
-                <FontAwesome name="external-link" size={16} color={t.colors.text.muted} />
-              </View>
-              <Pressable
-                onPress={() => {}}
-                style={({ pressed }) => [
-                  {
-                    minWidth: 92,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: '#DCE1DA',
-                    borderWidth: 1,
-                    borderColor: 'rgba(30,31,28,0.06)',
-                    opacity: pressed ? 0.95 : 1,
-                  },
-                ]}>
-                <Text style={[t.text.caption, { fontWeight: '700', fontSize: 14, color: t.colors.text.secondary }]}>
-                  Submit
-                </Text>
-              </Pressable>
-            </View>
-          </View>
         </View>
       </KeyboardAvoidingView>
     </View>

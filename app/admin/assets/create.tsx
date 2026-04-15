@@ -1,6 +1,8 @@
 import React from 'react';
 import { router } from 'expo-router';
-import { ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
 import { Button, FormField, SegmentedControl } from '@/src/components';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
@@ -14,6 +16,7 @@ export default function AdminCreateAssetPage() {
   const [department, setDepartment] = React.useState('');
   const [location, setLocation] = React.useState('');
   const [room, setRoom] = React.useState('');
+  const [assignedTo, setAssignedTo] = React.useState('');
   const [description, setDescription] = React.useState('');
   const [makeModel, setMakeModel] = React.useState('');
   const [serial, setSerial] = React.useState('');
@@ -23,20 +26,66 @@ export default function AdminCreateAssetPage() {
   const [purchaseCost, setPurchaseCost] = React.useState('');
   const [replacementCost, setReplacementCost] = React.useState('');
   const [purchaseDate, setPurchaseDate] = React.useState('');
+  const [warrantyExpiry, setWarrantyExpiry] = React.useState('');
   const [lastService, setLastService] = React.useState('');
-  const [nextService, setNextService] = React.useState('');
+  const [serviceFrequency, setServiceFrequency] = React.useState('');
+  const [serviceFrequencyPickerOpen, setServiceFrequencyPickerOpen] = React.useState(false);
+  const [serviceFrequencyDraft, setServiceFrequencyDraft] = React.useState('');
   const [remainingLife, setRemainingLife] = React.useState('');
   const [utilisation, setUtilisation] = React.useState('');
+  const [compatibilityOfUse, setCompatibilityOfUse] = React.useState('');
   const [environmentalImpact, setEnvironmentalImpact] = React.useState('');
   const [notes, setNotes] = React.useState('');
+
+  const serviceFrequencyOptions = React.useMemo(
+    () => [
+      { label: 'Select service frequency', value: '' },
+      { label: 'Weekly', value: 'Weekly' },
+      { label: 'Fortnightly', value: 'Fortnightly' },
+      { label: 'Monthly', value: 'Monthly' },
+      { label: 'Quarterly', value: 'Quarterly' },
+      { label: 'Biannual', value: 'Biannual' },
+      { label: 'Annual', value: 'Annual' },
+    ],
+    [],
+  );
+
+  const selectedServiceFrequencyLabel =
+    serviceFrequencyOptions.find((option) => option.value === serviceFrequency)?.label ??
+    'Select service frequency';
+
+  const requiredValues = [
+    name,
+    code,
+    category,
+    subCategory,
+    department,
+    location,
+    room,
+    description,
+    makeModel,
+    serial,
+    assignedTo,
+    purchaseCost,
+    replacementCost,
+    purchaseDate,
+    warrantyExpiry,
+    lastService,
+    serviceFrequency,
+    remainingLife,
+    utilisation,
+    compatibilityOfUse,
+    environmentalImpact,
+  ];
+  const canSaveAsset = requiredValues.every((value) => value.trim().length > 0);
 
   return (
     <ScreenContainer>
       <TopBar
         title="Create Asset"
         userName="Admin"
-        onPressBack={() => router.replace('/(admin-tabs)/assets' as any)}
-        onPressUser={() => router.push('/admin/profile' as any)}
+        onPressBack={() => router.replace('/(admin)/assets' as any)}
+        onPressUser={() => router.push('/(admin)/profile' as any)}
       />
       <ScrollView
         style={{ flex: 1 }}
@@ -68,6 +117,7 @@ export default function AdminCreateAssetPage() {
             <View style={{ flex: 1 }}><FormField label="Location" value={location} onChangeText={setLocation} /></View>
           </View>
           <FormField label="Room" value={room} onChangeText={setRoom} />
+          <FormField label="Assigned to" value={assignedTo} onChangeText={setAssignedTo} />
           <FormField label="Description" value={description} onChangeText={setDescription} multiline />
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
             <View style={{ flex: 1 }}><FormField label="Make / model" value={makeModel} onChangeText={setMakeModel} /></View>
@@ -115,28 +165,128 @@ export default function AdminCreateAssetPage() {
             <View style={{ flex: 1 }}><FormField label="Purchase date (YYYY-MM-DD)" value={purchaseDate} onChangeText={setPurchaseDate} /></View>
             <View style={{ flex: 1 }}><FormField label="Remaining life (years)" value={remainingLife} onChangeText={setRemainingLife} /></View>
           </View>
+          <FormField label="Warranty expiry (YYYY-MM-DD)" value={warrantyExpiry} onChangeText={setWarrantyExpiry} />
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
             <View style={{ flex: 1 }}><FormField label="Last serviced date" value={lastService} onChangeText={setLastService} /></View>
-            <View style={{ flex: 1 }}><FormField label="Next service date" value={nextService} onChangeText={setNextService} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={[t.text.caption, { fontWeight: '700', marginBottom: t.spacing.xs }]}>Service frequency</Text>
+              <Pressable
+                onPress={() => {
+                  setServiceFrequencyDraft(serviceFrequency);
+                  setServiceFrequencyPickerOpen(true);
+                }}
+                style={{
+                  minHeight: 52,
+                  borderRadius: t.radius.md,
+                  borderWidth: 1,
+                  borderColor: 'rgba(30,31,28,0.18)',
+                  backgroundColor: '#F4F2EE',
+                  paddingHorizontal: t.spacing.md,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                <Text style={[t.text.body, { color: serviceFrequency ? '#1E1F1C' : 'rgba(30,31,28,0.56)' }]}>
+                  {selectedServiceFrequencyLabel}
+                </Text>
+                <Feather name="chevron-down" size={16} color="#6A6A62" />
+              </Pressable>
+            </View>
           </View>
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
             <View style={{ flex: 1 }}><FormField label="Utilisation" value={utilisation} onChangeText={setUtilisation} /></View>
             <View style={{ flex: 1 }}><FormField label="Environmental impact" value={environmentalImpact} onChangeText={setEnvironmentalImpact} /></View>
           </View>
+          <FormField
+            label="Compatibility of use"
+            value={compatibilityOfUse}
+            onChangeText={setCompatibilityOfUse}
+          />
           <FormField label="Notes" value={notes} onChangeText={setNotes} multiline />
+          {!canSaveAsset ? (
+            <Text style={[t.text.caption, { color: '#A6584B' }]}>
+              Fill all required fields before saving the asset.
+            </Text>
+          ) : null}
 
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-            <Button label="Save asset" onPress={() => router.replace('/(admin-tabs)/assets' as any)} style={{ flex: 1 }} />
+            <Button
+              label="Save asset"
+              disabled={!canSaveAsset}
+              onPress={() => router.replace('/(admin)/assets' as any)}
+              style={{ flex: 1 }}
+            />
             <Button
               label="Cancel"
               variant="secondary"
-              onPress={() => router.replace('/(admin-tabs)/assets' as any)}
+              onPress={() => router.replace('/(admin)/assets' as any)}
               style={{ flex: 1 }}
             />
           </View>
         </View>
       </ScrollView>
       <AdminAppBottomNav />
+      <Modal
+        visible={serviceFrequencyPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setServiceFrequencyPickerOpen(false)}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.18)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: t.spacing.xl,
+          }}>
+          <Pressable
+            onPress={() => setServiceFrequencyPickerOpen(false)}
+            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+          />
+          <View
+            style={{
+              width: '100%',
+              maxWidth: 560,
+              borderWidth: 1,
+              borderColor: t.colors.border.subtle,
+              borderRadius: t.radius.lg,
+              backgroundColor: t.colors.card.surface,
+              overflow: 'hidden',
+            }}>
+            <View
+              style={{
+                minHeight: 46,
+                paddingHorizontal: t.spacing.md,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderBottomWidth: 1,
+                borderBottomColor: t.colors.border.subtle,
+              }}>
+              <Pressable onPress={() => setServiceFrequencyPickerOpen(false)}>
+                <Text style={{ color: t.colors.text.muted, fontWeight: '700' }}>Cancel</Text>
+              </Pressable>
+              <Text style={[t.text.caption, { fontWeight: '700' }]}>Service frequency</Text>
+              <Pressable
+                onPress={() => {
+                  setServiceFrequency(serviceFrequencyDraft);
+                  setServiceFrequencyPickerOpen(false);
+                }}>
+                <Text style={{ color: t.colors.brand.forest, fontWeight: '700' }}>Done</Text>
+              </Pressable>
+            </View>
+            <Picker
+              selectedValue={serviceFrequencyDraft}
+              onValueChange={(value) => setServiceFrequencyDraft(String(value))}
+              style={{ height: 230 }}
+              itemStyle={{ fontSize: 18 }}>
+              {serviceFrequencyOptions.map((option) => (
+                <Picker.Item key={option.value} label={option.label} value={option.value} />
+              ))}
+            </Picker>
+          </View>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }

@@ -2,11 +2,12 @@ import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ScrollView, Text, View } from 'react-native';
 import { Button, StatusBadge } from '@/src/components';
-import { assetAuditHistory, assetById, departmentById, locationById, roomById } from '@/src/data';
+import { assetById, departmentById, locationById, roomById } from '@/src/data';
+import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 
-export default function AssetDetailScreen() {
+function AssetDetailContent() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const asset = id ? assetById[id] : undefined;
@@ -28,7 +29,6 @@ export default function AssetDetailScreen() {
   const location = locationById[asset.location_id];
   const room = roomById[asset.room_id];
   const department = departmentById[asset.dept_id];
-  const audits = assetAuditHistory.filter((h) => h.asset_id === asset.id).slice(0, 3);
   const fmtCurrency = (n: number) =>
     new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(n);
   const statusLabel =
@@ -150,50 +150,22 @@ export default function AssetDetailScreen() {
         <SectionHeading title="Notes" />
         <Text style={t.text.bodyMuted}>{asset.notes}</Text>
 
-        <SectionDivider />
-        <SectionHeading title="Condition report history preview" />
-        <Text style={[t.text.caption, { marginBottom: t.spacing.md }]}>Recent condition reports for this asset</Text>
-        <View style={{ gap: t.spacing.md }}>
-          {audits.length === 0 ? (
-            <Text style={t.text.caption}>No recent condition reports found for this asset.</Text>
-          ) : (
-            audits.map((h) => (
-              <View
-                key={h.id}
-                style={{
-                  borderRadius: t.radius.md,
-                  borderWidth: 1,
-                  borderColor: t.colors.border.subtle,
-                  backgroundColor: t.colors.card.surfaceAlt,
-                  paddingHorizontal: t.spacing.md,
-                  paddingVertical: t.spacing.sm,
-                }}>
-                <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>
-                  {new Date(h.audit_date).toLocaleDateString()} · {h.inspector_name}
-                </Text>
-                <Text style={[t.text.caption, { marginTop: 2 }]}>Findings: {h.findings}</Text>
-                <Text style={[t.text.caption, { marginTop: 2 }]}>Photo taken: {h.photo_taken ? 'Yes' : 'No'}</Text>
-                <Text style={[t.text.caption, { marginTop: 2 }]}>{h.notes}</Text>
-              </View>
-            ))
-          )}
-        </View>
-
-        <SectionDivider />
         <SectionHeading title="Actions" />
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           <Button label="Start Condition Report" onPress={() => router.push('/audit/select-location' as any)} style={{ flex: 1 }} />
-          <Button
-            label="View Condition Report History"
-            variant="secondary"
-            onPress={() => router.push((`/audit/history?assetId=${asset.id}` as any) as any)}
-            style={{ flex: 1 }}
-          />
           <Button label="Add to To-Do List" variant="secondary" onPress={() => {}} style={{ flex: 1 }} />
         </View>
       </ScrollView>
       <AppBottomNav />
     </ScreenContainer>
+  );
+}
+
+export default function AssetDetailScreen() {
+  return (
+    <RequireWorkspace role="auditor">
+      <AssetDetailContent />
+    </RequireWorkspace>
   );
 }
 

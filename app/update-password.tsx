@@ -2,10 +2,11 @@ import React from 'react';
 import { router } from 'expo-router';
 import { ScrollView, Text, View } from 'react-native';
 import { Button, FormField, SectionCard } from '@/src/components';
+import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 
-export default function UpdatePasswordScreen() {
+function UpdatePasswordContent() {
   const t = useTheme();
   const [currentPassword, setCurrentPassword] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
@@ -37,6 +38,14 @@ export default function UpdatePasswordScreen() {
       </ScrollView>
       <AppBottomNav />
     </ScreenContainer>
+  );
+}
+
+export default function UpdatePasswordScreen() {
+  return (
+    <RequireWorkspace role="auditor">
+      <UpdatePasswordContent />
+    </RequireWorkspace>
   );
 }
 

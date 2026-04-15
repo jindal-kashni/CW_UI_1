@@ -5,9 +5,10 @@ import { Button, SectionCard, StatusBadge } from '@/src/components';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { getAlertAction, getAlertMeaning } from '@/src/utils/alertMeta';
 
-export default function AlertDetailScreen() {
+function AlertDetailContent() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { alerts, markAlertRead } = useDemoState();
@@ -79,6 +80,14 @@ export default function AlertDetailScreen() {
       </ScrollView>
       <AppBottomNav />
     </ScreenContainer>
+  );
+}
+
+export default function AlertDetailScreen() {
+  return (
+    <RequireWorkspace role="auditor">
+      <AlertDetailContent />
+    </RequireWorkspace>
   );
 }
 

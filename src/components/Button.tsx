@@ -7,11 +7,13 @@ export function Button({
   onPress,
   variant = 'primary',
   style,
+  disabled = false,
 }: {
   label: string;
   onPress?: () => void;
   variant?: 'primary' | 'secondary';
   style?: ViewStyle;
+  disabled?: boolean;
 }) {
   const t = useTheme();
   const base = variant === 'primary' ? t.button.primary : t.button.secondary;
@@ -19,13 +21,14 @@ export function Button({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
       style={({ pressed }) => [
         base,
         {
           alignItems: 'center',
           justifyContent: 'center',
-          opacity: pressed ? 0.92 : 1,
+          opacity: disabled ? 0.45 : pressed ? 0.92 : 1,
         },
         style,
       ]}>
