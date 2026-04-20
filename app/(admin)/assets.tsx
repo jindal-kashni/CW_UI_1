@@ -9,6 +9,7 @@ import { AdminScreenScaffold } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { Asset } from '@/src/types/models';
+import { supabase } from '@/utils/supabase'
 
 type DropdownKey =
   | 'category'
@@ -24,7 +25,29 @@ type FilterMode = 'search' | 'filters';
 export default function AdminAssetsPage() {
   const t = useTheme();
   const { assignments } = useDemoState();
-  const [assetRows, setAssetRows] = React.useState(assets);
+  const [assetRows, setAssetRows] = React.useState<any[]>([])
+  const [loading, setLoading] = React.useState(true)
+
+   React.useEffect(() => {
+    fetchAssets()
+  }, [])
+
+  const fetchAssets = async () => {
+    const { data, error } = await supabase
+      .from('asset').select('*')
+
+    console.log('SUPABASE DATA:', data)
+    console.log('SUPABASE ERROR RAW:', JSON.stringify(error, null, 2))
+    if (error) {
+      console.log(error)
+      return
+    }
+
+    setAssetRows(data || [])
+    setLoading(false)
+  }
+
+
   const [query, setQuery] = React.useState('');
   const [filterMode, setFilterMode] = React.useState<FilterMode>('search');
   const [category, setCategory] = React.useState<string | undefined>(undefined);
@@ -492,7 +515,7 @@ export default function AdminAssetsPage() {
         </View>
 
         {rows.map((a, idx) => {
-          const currentAssignment = assignmentInProgressFor(a.id);
+          const currentAssignment = assignmentInProgressFor(a.asset_id);
           const loc = locationById[a.location_id];
           const rm = roomById[a.room_id];
           const departmentName = loc?.department_name ?? 'Unknown department';
@@ -503,8 +526,8 @@ export default function AdminAssetsPage() {
 
           return (
             <Pressable
-              key={a.id}
-              onPress={() => router.push(`/admin/assets/${a.id}` as any)}
+              key={a.asset_id}
+              onPress={() => router.push(`/admin/assets/${a.asset_id}` as any)}
               style={({ pressed }) => [
                 {
                   flexDirection: 'row',
@@ -565,7 +588,7 @@ export default function AdminAssetsPage() {
 
               <View style={{ flex: 1.2, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 14 }}>
                 <Pressable
-                  onPress={() => router.push(`/admin/assets/assign-report/${a.id}` as any)}
+                  onPress={() => router.push(`/admin/assets/assign-report/${a.asset_id}` as any)}
                   hitSlop={8}
                   style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}>
                   <FontAwesome
@@ -575,7 +598,7 @@ export default function AdminAssetsPage() {
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => router.push((`/admin/assets/edit/${a.id}` as any) as any)}
+                  onPress={() => router.push((`/admin/assets/edit/${a.asset_id}` as any) as any)}
                   hitSlop={8}
                   style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}>
                   <FontAwesome name="pencil" size={17} color={t.colors.brand.forest} />
