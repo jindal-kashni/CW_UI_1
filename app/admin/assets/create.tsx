@@ -6,6 +6,7 @@ import { Picker } from '@react-native-picker/picker';
 import { Button, FormField, SegmentedControl } from '@/src/components';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { supabase } from '@/utils/supabase';
 
 export default function AdminCreateAssetPage() {
   const t = useTheme();
@@ -36,6 +37,8 @@ export default function AdminCreateAssetPage() {
   const [compatibilityOfUse, setCompatibilityOfUse] = React.useState('');
   const [environmentalImpact, setEnvironmentalImpact] = React.useState('');
   const [notes, setNotes] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  
 
   const serviceFrequencyOptions = React.useMemo(
     () => [
@@ -78,6 +81,54 @@ export default function AdminCreateAssetPage() {
     environmentalImpact,
   ];
   const canSaveAsset = requiredValues.every((value) => value.trim().length > 0);
+
+  const handleSaveAsset = async () => {
+    if (!canSaveAsset) return;
+
+    setSaving(true);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    console.log('SESSION:', session);
+
+    const { data, error } = await supabase
+      .from('asset')
+      .insert([
+        {
+          asset_code: code,
+          name: name,
+          category: category,
+          sub_category: subCategory,
+          description: description,
+          make_model: makeModel,
+          serial_number: serial,
+          condition: condition,
+          criticality: criticality,
+          status: status,
+          purchase_cost: Number(purchaseCost),
+          replacement_cost: Number(replacementCost),
+          purchase_date: purchaseDate,
+          warranty_expiry: warrantyExpiry,
+          assigned_to: assignedTo,
+          last_serviced_date: lastService,
+          remaining_life_years: Number(remainingLife),
+          compatibility_of_use: compatibilityOfUse,
+          environmental_impact: environmentalImpact,
+          notes: notes,
+        },
+      ])
+      .select();
+
+    console.log('CREATE DATA:', data);
+    console.log('CREATE ERROR:', error);
+
+    setSaving(false);
+
+    if (error) return;
+
+    router.replace('/(admin)/assets' as any);
+  };
 
   return (
     <ScreenContainer>
@@ -211,10 +262,9 @@ export default function AdminCreateAssetPage() {
 
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
             <Button
-              label="Save asset"
-              disabled={!canSaveAsset}
-              onPress={() => router.replace('/(admin)/assets' as any)}
-              style={{ flex: 1 }}
+              label={saving ? 'Saving...' : 'Save asset'}
+              disabled={!canSaveAsset || saving}
+              onPress={handleSaveAsset}
             />
             <Button
               label="Cancel"

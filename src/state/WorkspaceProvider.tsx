@@ -1,12 +1,12 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { supabase } from '@/utils/supabase';
 
 export type WorkspaceRole = 'admin' | 'auditor';
 
 type Ctx = {
   role: WorkspaceRole | null;
   setRole: (role: WorkspaceRole) => void;
-  logout: () => void;
-  /** Shown once on the login screen after logout; cleared on sign-in or manually. */
+  logout: () => Promise<void>;
   signOutMessage: string | null;
   clearSignOutMessage: () => void;
 };
@@ -25,7 +25,13 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     setSignOutMessage(null);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.log('SIGN OUT ERROR:', error);
+    }
+
     setRoleState(null);
     setSignOutMessage('Successfully logged out');
   }, []);

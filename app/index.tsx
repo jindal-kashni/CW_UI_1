@@ -11,31 +11,56 @@ import {
 } from 'react-native';
 import { useTheme } from '@/src/theme';
 import { useWorkspace } from '@/src/state/WorkspaceProvider';
+import { supabase } from '@/utils/supabase';
 
 export default function LoginScreen() {
   const t = useTheme();
   const { setRole, signOutMessage, clearSignOutMessage } = useWorkspace();
+
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [remember, setRemember] = React.useState(true);
   const [roleError, setRoleError] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
 
-  const onSignIn = () => {
+  const onSignIn = async () => {
     clearSignOutMessage();
-    const roleInput = email.trim().toLowerCase();
-    if (roleInput.includes('admin')) {
-      setRoleError('');
+    setRoleError('');
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail || !trimmedPassword) {
+      setRoleError('Enter your email and password.');
+      return;
+    }
+
+    setLoading(true);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password: trimmedPassword,
+    });
+
+    if (error) {
+      setLoading(false);
+      setRoleError(error.message);
+      return;
+    }
+
+    const userEmail = data.user?.email?.toLowerCase() ?? '';
+
+    // roles defined here
+    if (userEmail.includes('admin')) {
       setRole('admin');
+      setLoading(false);
       router.replace('/(admin)' as any);
       return;
     }
-    if (roleInput.includes('audit') || roleInput.includes('auditor')) {
-      setRoleError('');
-      setRole('auditor');
-      router.replace('/(auditor)/audits' as any);
-      return;
-    }
-    setRoleError('Enter "admin" for Admin workspace or "audit" for Auditor workspace.');
+
+    setRole('auditor');
+    setLoading(false);
+    router.replace('/(auditor)/audits' as any);
   };
 
   return (
@@ -54,6 +79,7 @@ export default function LoginScreen() {
             }}>
             Welcome back
           </Text>
+
           <Text style={[t.text.caption, { marginTop: 10, fontSize: 16, lineHeight: 22 }]}>
             Sign in to manage sanctuary assets
           </Text>
@@ -71,12 +97,21 @@ export default function LoginScreen() {
               }}
               accessibilityRole="text"
               accessibilityLiveRegion="polite">
-              <Text style={{ color: '#2F5B45', fontWeight: '700', fontSize: 15, lineHeight: 20 }}>{signOutMessage}</Text>
+              <Text style={{ color: '#2F5B45', fontWeight: '700', fontSize: 15, lineHeight: 20 }}>
+                {signOutMessage}
+              </Text>
             </View>
           ) : null}
 
           <View style={{ marginTop: 30, gap: 14 }}>
-            <Text style={[t.text.caption, { color: t.colors.text.secondary, fontWeight: '700', fontSize: 15 }]}>Username or email</Text>
+            <Text
+              style={[
+                t.text.caption,
+                { color: t.colors.text.secondary, fontWeight: '700', fontSize: 15 },
+              ]}>
+              Username or email
+            </Text>
+
             <View
               style={{
                 borderRadius: 14,
@@ -97,6 +132,7 @@ export default function LoginScreen() {
                 style={{ flex: 1, fontSize: 16, color: t.colors.text.primary }}
                 autoCapitalize="none"
                 keyboardType="email-address"
+                editable={!loading}
               />
               <FontAwesome name="envelope-o" size={16} color={t.colors.text.muted} />
             </View>
@@ -104,13 +140,25 @@ export default function LoginScreen() {
 
           <View style={{ marginTop: 14, gap: 14 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={[t.text.caption, { color: t.colors.text.secondary, fontWeight: '700', fontSize: 15 }]}>Password</Text>
+              <Text
+                style={[
+                  t.text.caption,
+                  { color: t.colors.text.secondary, fontWeight: '700', fontSize: 15 },
+                ]}>
+                Password
+              </Text>
+
               <Pressable onPress={() => router.push('/forgot-password' as any)}>
-                <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700', fontSize: 14 }]}>
+                <Text
+                  style={[
+                    t.text.caption,
+                    { color: t.colors.brand.forest, fontWeight: '700', fontSize: 14 },
+                  ]}>
                   Forgot password?
                 </Text>
               </Pressable>
             </View>
+
             <View
               style={{
                 borderRadius: 14,
@@ -130,6 +178,7 @@ export default function LoginScreen() {
                 placeholderTextColor={t.colors.text.muted}
                 secureTextEntry
                 style={{ flex: 1, fontSize: 16, color: t.colors.text.primary }}
+                editable={!loading}
               />
               <FontAwesome name="eye" size={16} color={t.colors.text.muted} />
             </View>
@@ -156,6 +205,7 @@ export default function LoginScreen() {
 
           <Pressable
             onPress={onSignIn}
+            disabled={loading}
             style={({ pressed }) => [
               {
                 marginTop: 20,
@@ -164,19 +214,22 @@ export default function LoginScreen() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: t.colors.brand.forest,
-                opacity: pressed ? 0.93 : 1,
+                opacity: loading || pressed ? 0.93 : 1,
               },
             ]}>
             <Text style={{ color: '#F8F7F3', fontWeight: '700', fontSize: 18 }}>
-              Sign In <FontAwesome name="long-arrow-right" size={16} />
+              {loading ? 'Signing In...' : 'Sign In '}
+              {!loading ? <FontAwesome name="long-arrow-right" size={16} /> : null}
             </Text>
           </Pressable>
+
           {roleError ? (
-            <Text style={[t.text.caption, { color: '#B63E34', marginTop: t.spacing.sm }]}>{roleError}</Text>
+            <Text style={[t.text.caption, { color: '#B63E34', marginTop: t.spacing.sm }]}>
+              {roleError}
+            </Text>
           ) : null}
         </View>
       </KeyboardAvoidingView>
     </View>
   );
 }
-

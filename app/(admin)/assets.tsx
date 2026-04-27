@@ -35,9 +35,6 @@ export default function AdminAssetsPage() {
   const fetchAssets = async () => {
     const { data, error } = await supabase
       .from('asset').select('*')
-
-    console.log('SUPABASE DATA:', data)
-    console.log('SUPABASE ERROR RAW:', JSON.stringify(error, null, 2))
     if (error) {
       console.log(error)
       return

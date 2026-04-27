@@ -8,13 +8,75 @@ import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { AssetCondition } from '@/src/types/models';
+import { supabase } from '@/utils/supabase';
 
 export default function AdminAssetDetailPage() {
   const t = useTheme();
   const { assignments } = useDemoState();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const asset = id ? assetById[id] : undefined;
-  if (!asset) {
+  const [asset, setAsset] = React.useState<any | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [assetPendingDelete, setAssetPendingDelete] = React.useState(false);
+  const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
+  const [deleteNameInput, setDeleteNameInput] = React.useState('');
+  const [selectedReport, setSelectedReport] = React.useState<(typeof assetAuditHistory)[number] | null>(null);
+
+
+  React.useEffect(() => {
+    if (!id) return;
+
+    const fetchAsset = async () => {
+      const { data, error } = await supabase
+        .from('asset')
+        .select('*')
+        .eq('asset_id', id)
+        .single();
+
+      console.log('ASSET DETAIL DATA:', data);
+      console.log('ASSET DETAIL ERROR:', error);
+
+      if (error) {
+        setLoading(false);
+        return;
+      }
+
+      setAsset({
+        ...data,
+        id: data.asset_id,
+      });
+      setLoading(false);
+    };
+
+    fetchAsset();
+  }, [id]);
+
+  const SectionHeading = ({ title }: { title: string }) => (
+    <Text style={[t.text.title, { fontSize: 22, lineHeight: 28, marginBottom: t.spacing.md }]}>{title}</Text>
+  );
+  const SectionDivider = () => (
+    <View style={{ marginVertical: t.spacing.xl }}>
+      <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
+    </View>
+  );
+
+    if (loading) {
+    return (
+      <ScreenContainer>
+        <TopBar
+          title="Asset Detail"
+          userName="Admin"
+          onPressBack={() => router.replace('/(admin)/assets' as any)}
+          onPressUser={() => router.push('/(admin)/profile' as any)}
+        />
+        <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
+          <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Loading asset...</Text>
+        </View>
+        <AdminAppBottomNav />
+      </ScreenContainer>
+    );
+  }
+
+  if (!asset && !loading) {
     return (
       <ScreenContainer>
         <TopBar
@@ -34,10 +96,6 @@ export default function AdminAssetDetailPage() {
   const location = locationById[asset.location_id];
   const room = roomById[asset.room_id];
   const department = departmentById[asset.dept_id];
-  const [assetPendingDelete, setAssetPendingDelete] = React.useState(false);
-  const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
-  const [deleteNameInput, setDeleteNameInput] = React.useState('');
-  const [selectedReport, setSelectedReport] = React.useState<(typeof assetAuditHistory)[number] | null>(null);
   const history = assetAuditHistory
     .filter((h) => h.asset_id === asset.id)
     .sort((a, b) => new Date(a.audit_date).getTime() - new Date(b.audit_date).getTime());
@@ -109,14 +167,6 @@ export default function AdminAssetDetailPage() {
       ['Assigned', 'InProgress', 'DraftSaved'].includes(assignment.status)
   );
 
-  const SectionHeading = ({ title }: { title: string }) => (
-    <Text style={[t.text.title, { fontSize: 22, lineHeight: 28, marginBottom: t.spacing.md }]}>{title}</Text>
-  );
-  const SectionDivider = () => (
-    <View style={{ marginVertical: t.spacing.xl }}>
-      <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
-    </View>
-  );
 
   return (
     <ScreenContainer>
@@ -522,11 +572,18 @@ export default function AdminAssetDetailPage() {
                   />
                   <Button
                     label="Delete asset"
-                    onPress={() => {
+                    onPress={async () => {
                       if (deleteNameInput !== asset.name) return;
-                      const idx = assets.findIndex((item) => item.id === asset.id);
-                      if (idx >= 0) assets.splice(idx, 1);
-                      delete assetById[asset.id];
+
+                      const { error } = await supabase
+                        .from('asset')
+                        .delete()
+                        .eq('asset_id', asset.id);
+
+                      console.log('DELETE ERROR:', error);
+
+                      if (error) return;
+
                       setAssetPendingDelete(false);
                       setDeleteStep('confirm');
                       setDeleteNameInput('');
