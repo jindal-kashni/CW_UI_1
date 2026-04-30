@@ -1,14 +1,21 @@
 import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Button, StatusBadge } from '@/src/components';
 import { assetAuditHistory, departmentById, locationById, roomById } from '@/src/data';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 import type { Asset, AssetCondition } from '@/src/types/models';
 import { deleteAsset, fetchAssetById } from '@/src/services/assets';
+import {
+  fetchCapexForecastForAsset,
+  fetchComplianceChecksForAsset,
+  type CapexForecastRecord,
+  type ComplianceCheckRecord,
+} from '@/src/services/adminInsights';
 
 export default function AdminAssetDetailPage() {
   const t = useTheme();
@@ -20,6 +27,9 @@ export default function AdminAssetDetailPage() {
   const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
   const [deleteNameInput, setDeleteNameInput] = React.useState('');
   const [selectedReport, setSelectedReport] = React.useState<(typeof assetAuditHistory)[number] | null>(null);
+  const [complianceChecks, setComplianceChecks] = React.useState<ComplianceCheckRecord[]>([]);
+  const [capexForecast, setCapexForecast] = React.useState<CapexForecastRecord[]>([]);
+  const [loadingInsights, setLoadingInsights] = React.useState(true);
 
 
   React.useEffect(() => {
@@ -43,6 +53,19 @@ export default function AdminAssetDetailPage() {
     };
 
     fetchAsset();
+  }, [id]);
+
+  React.useEffect(() => {
+    if (!id) return;
+    (async () => {
+      const [complianceRows, capexRows] = await Promise.all([
+        fetchComplianceChecksForAsset(id),
+        fetchCapexForecastForAsset(id),
+      ]);
+      setComplianceChecks(complianceRows);
+      setCapexForecast(capexRows);
+      setLoadingInsights(false);
+    })();
   }, [id]);
 
   const SectionHeading = ({ title }: { title: string }) => (
@@ -247,7 +270,7 @@ export default function AdminAssetDetailPage() {
         <SectionHeading title="Lifecycle and cost" />
         <View style={{ gap: 6 }}>
             <Text style={t.text.caption}>
-              <Text style={{ fontWeight: '700' }}>Purchase date:</Text> {new Date(currentAsset.purchase_date).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Purchase date:</Text> {formatDateDDMMYYYY(currentAsset.purchase_date)}
             </Text>
           <Text style={t.text.caption}>
               <Text style={{ fontWeight: '700' }}>Purchase cost:</Text> ${currentAsset.purchase_cost.toLocaleString()}
@@ -256,7 +279,7 @@ export default function AdminAssetDetailPage() {
               <Text style={{ fontWeight: '700' }}>Replacement cost:</Text> ${currentAsset.replacement_cost.toLocaleString()}
           </Text>
           <Text style={t.text.caption}>
-              <Text style={{ fontWeight: '700' }}>Warranty expiry:</Text> {new Date(currentAsset.warranty_expiry).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Warranty expiry:</Text> {formatDateDDMMYYYY(currentAsset.warranty_expiry)}
           </Text>
         </View>
 
@@ -264,10 +287,10 @@ export default function AdminAssetDetailPage() {
         <SectionHeading title="Service history" />
         <View style={{ gap: 6 }}>
           <Text style={t.text.caption}>
-              <Text style={{ fontWeight: '700' }}>Last serviced:</Text> {new Date(currentAsset.last_serviced_date).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Last serviced:</Text> {formatDateDDMMYYYY(currentAsset.last_serviced_date)}
           </Text>
           <Text style={t.text.caption}>
-              <Text style={{ fontWeight: '700' }}>Next service:</Text> {new Date(currentAsset.next_service_date).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Next service:</Text> {formatDateDDMMYYYY(currentAsset.next_service_date)}
           </Text>
         </View>
 
@@ -280,63 +303,76 @@ export default function AdminAssetDetailPage() {
         <Text style={[t.text.caption, { marginTop: -6, marginBottom: t.spacing.md }]}>
           Historical condition versus expected depreciation from purchase year to projected end-of-life.
         </Text>
-        <View
-          style={{
-            borderWidth: 1,
-            borderColor: t.colors.border.subtle,
-            borderRadius: t.radius.lg,
-            backgroundColor: t.colors.card.surface,
-            padding: t.spacing.md,
-          }}>
-          <Text style={[t.text.caption, { fontWeight: '700', marginBottom: t.spacing.sm }]}>
-            Condition trend graph
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: t.spacing.sm }}>
-            {reportRows.map((row) => {
-              const observedHeight = Math.max(8, row.observedScore * 18);
-              const expectedHeight = Math.max(8, row.expectedScore * 18);
-              return (
-                <View key={row.id} style={{ flex: 1, alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 120 }}>
-                    <View
-                      style={{
-                        width: 12,
-                        height: observedHeight,
-                        borderRadius: 6,
-                        backgroundColor: '#2F5B45',
-                      }}
-                    />
-                    <View
-                      style={{
-                        width: 12,
-                        height: expectedHeight,
-                        borderRadius: 6,
-                        backgroundColor: '#9AA49A',
-                      }}
-                    />
-                  </View>
-                  <Text style={[t.text.caption, { marginTop: 6, fontSize: 11 }]}>
-                    {new Date(row.audit_date).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}
-                  </Text>
-                </View>
-              );
-            })}
+        {reportRows.length === 0 ? (
+          <View
+            style={{
+              borderWidth: 1,
+              borderColor: t.colors.border.subtle,
+              borderRadius: t.radius.lg,
+              backgroundColor: t.colors.card.surface,
+              padding: t.spacing.md,
+            }}>
+            <Text style={t.text.caption}>No condition reports are associated with this asset yet.</Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: t.spacing.md, marginTop: t.spacing.sm }}>
-            <Text style={t.text.caption}>■ Observed</Text>
-            <Text style={t.text.caption}>■ Expected</Text>
-          </View>
-        </View>
+        ) : (
+          <>
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: t.colors.border.subtle,
+                borderRadius: t.radius.lg,
+                backgroundColor: t.colors.card.surface,
+                padding: t.spacing.md,
+              }}>
+              <Text style={[t.text.caption, { fontWeight: '700', marginBottom: t.spacing.sm }]}>
+                Condition trend graph
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: t.spacing.sm }}>
+                {reportRows.map((row) => {
+                  const observedHeight = Math.max(8, row.observedScore * 18);
+                  const expectedHeight = Math.max(8, row.expectedScore * 18);
+                  return (
+                    <View key={row.id} style={{ flex: 1, alignItems: 'center' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 120 }}>
+                        <View
+                          style={{
+                            width: 12,
+                            height: observedHeight,
+                            borderRadius: 6,
+                            backgroundColor: '#2F5B45',
+                          }}
+                        />
+                        <View
+                          style={{
+                            width: 12,
+                            height: expectedHeight,
+                            borderRadius: 6,
+                            backgroundColor: '#9AA49A',
+                          }}
+                        />
+                      </View>
+                      <Text style={[t.text.caption, { marginTop: 6, fontSize: 11 }]}>
+                        {formatDateDDMMYYYY(row.audit_date)}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+              <View style={{ flexDirection: 'row', gap: t.spacing.md, marginTop: t.spacing.sm }}>
+                <Text style={t.text.caption}>■ Observed</Text>
+                <Text style={t.text.caption}>■ Expected</Text>
+              </View>
+            </View>
 
-        <View style={{ height: t.spacing.lg }} />
-        <View
-          style={{
-            borderWidth: 1,
-            borderColor: t.colors.border.subtle,
-            borderRadius: t.radius.lg,
-            overflow: 'hidden',
-            backgroundColor: t.colors.card.surface,
-          }}>
+            <View style={{ height: t.spacing.lg }} />
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: t.colors.border.subtle,
+                borderRadius: t.radius.lg,
+                overflow: 'hidden',
+                backgroundColor: t.colors.card.surface,
+              }}>
           <View
             style={{
               flexDirection: 'row',
@@ -367,7 +403,7 @@ export default function AdminAssetDetailPage() {
                   borderBottomWidth: idx === reportRows.length - 1 ? 0 : 1,
                   borderBottomColor: t.colors.border.subtle,
                 }}>
-                <Text style={[t.text.caption, { flex: 1 }]}>{new Date(row.audit_date).toLocaleDateString()}</Text>
+                <Text style={[t.text.caption, { flex: 1 }]}>{formatDateDDMMYYYY(row.audit_date)}</Text>
                 <Text style={[t.text.caption, { flex: 1 }]}>{row.inspector_name}</Text>
                 <View style={{ flex: 1, alignItems: 'flex-start' }}>
                   <View
@@ -415,7 +451,9 @@ export default function AdminAssetDetailPage() {
               </View>
             );
           })}
-        </View>
+            </View>
+          </>
+        )}
 
         <SectionDivider />
         <View style={{ gap: t.spacing.md }}>
@@ -430,6 +468,84 @@ export default function AdminAssetDetailPage() {
             disabled={Boolean(activeAssignment)}
           />
         </View>
+
+        <SectionDivider />
+        <SectionHeading title="Compliance checks" />
+        {loadingInsights ? (
+          <View style={{ minHeight: 100, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <ActivityIndicator size="small" color={t.colors.brand.forest} />
+            <Text style={t.text.caption}>Loading compliance checks...</Text>
+          </View>
+        ) : complianceChecks.length === 0 ? (
+          <Text style={t.text.caption}>No compliance checks logged for this asset yet.</Text>
+        ) : (
+          <View style={{ gap: t.spacing.sm }}>
+            {complianceChecks.map((check) => (
+              <View
+                key={check.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: t.colors.border.subtle,
+                  borderRadius: t.radius.md,
+                  backgroundColor: t.colors.card.surface,
+                  paddingHorizontal: t.spacing.md,
+                  paddingVertical: t.spacing.sm,
+                  gap: 4,
+                }}>
+                <Text style={[t.text.body, { fontWeight: '700' }]}>{check.checkType || 'Compliance check'}</Text>
+                <Text style={t.text.caption}>
+                  Status: {check.status || 'Unknown'} · Checked by: {check.checkedBy || 'Unknown'}
+                </Text>
+                <Text style={t.text.caption}>
+                  Check date: {check.checkDate ? formatDateDDMMYYYY(check.checkDate) : 'Not set'} · Next review:{' '}
+                  {check.nextReviewDate ? formatDateDDMMYYYY(check.nextReviewDate) : 'Not set'}
+                </Text>
+                {check.notes ? <Text style={t.text.caption}>{check.notes}</Text> : null}
+              </View>
+            ))}
+          </View>
+        )}
+
+        <SectionDivider />
+        <SectionHeading title="CapEx forecast" />
+        {loadingInsights ? (
+          <View style={{ minHeight: 100, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <ActivityIndicator size="small" color={t.colors.brand.forest} />
+            <Text style={t.text.caption}>Loading capital forecast...</Text>
+          </View>
+        ) : capexForecast.length === 0 ? (
+          <Text style={t.text.caption}>No capital forecast entries linked to this asset yet.</Text>
+        ) : (
+          <View style={{ gap: t.spacing.sm }}>
+            {capexForecast.map((entry) => (
+              <View
+                key={entry.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: t.colors.border.subtle,
+                  borderRadius: t.radius.md,
+                  backgroundColor: t.colors.card.surface,
+                  paddingHorizontal: t.spacing.md,
+                  paddingVertical: t.spacing.sm,
+                  gap: 4,
+                }}>
+                <Text style={[t.text.body, { fontWeight: '700' }]}>{entry.item || 'CapEx item'}</Text>
+                <Text style={t.text.caption}>
+                  Priority: {entry.priority || 'Unspecified'} · Timeframe: {entry.timeframe || 'Unspecified'}
+                </Text>
+                <Text style={t.text.caption}>
+                  Estimated cost: {typeof entry.estimatedCost === 'number' ? `$${entry.estimatedCost.toLocaleString()}` : 'Not set'}
+                </Text>
+                <Text style={t.text.caption}>
+                  Identified: {entry.identifiedDate ? formatDateDDMMYYYY(entry.identifiedDate) : 'Not set'} · Target:{' '}
+                  {entry.targetCompletion ? formatDateDDMMYYYY(entry.targetCompletion) : 'Not set'}
+                </Text>
+                {entry.recommendedAction ? <Text style={t.text.caption}>{entry.recommendedAction}</Text> : null}
+                {entry.notes ? <Text style={t.text.caption}>{entry.notes}</Text> : null}
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
       <AdminAppBottomNav />
 
@@ -460,7 +576,7 @@ export default function AdminAssetDetailPage() {
             }}>
             <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Condition report</Text>
             <Text style={t.text.caption}>
-              {selectedReport ? `${new Date(selectedReport.audit_date).toLocaleDateString()} · ${selectedReport.inspector_name}` : ''}
+              {selectedReport ? `${formatDateDDMMYYYY(selectedReport.audit_date)} · ${selectedReport.inspector_name}` : ''}
             </Text>
             <View
               style={{

@@ -31,10 +31,25 @@ export function AdminScreenScaffold({
   const segments = useSegments();
   const pathname = usePathname();
   const inAdminRoot = segments[0] === 'admin';
-  const showBack = inAdminRoot && pathname !== '/admin' && pathname !== '/admin/index';
+  const rootPagesWithoutBack = new Set([
+    '/admin',
+    '/admin/index',
+    '/admin/reports',
+    '/admin/reports/assign',
+    '/admin/assets',
+    '/admin/users',
+    '/admin/settings',
+    '/admin/alerts',
+    '/admin/profile',
+  ]);
+  const showBack = inAdminRoot && !rootPagesWithoutBack.has(pathname);
   const handleAdminBack = React.useCallback(() => {
     if (pathname === '/admin/update-password') {
       router.replace('/admin/profile' as any);
+      return;
+    }
+    if (pathname === '/admin/locations') {
+      router.replace('/admin/users' as any);
       return;
     }
     if (pathname.startsWith('/admin/locations')) {
@@ -47,6 +62,10 @@ export function AdminScreenScaffold({
     }
     if (pathname.startsWith('/admin/assets')) {
       router.replace('/admin/assets' as any);
+      return;
+    }
+    if (pathname.startsWith('/admin/rooms')) {
+      router.replace('/admin/users' as any);
       return;
     }
     router.replace('/admin/settings' as any);

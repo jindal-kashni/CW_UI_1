@@ -7,13 +7,14 @@ import {
   SectionCard,
   SegmentedControl,
 } from '@/src/components';
-import { assetById, conditionOptions, criticalityOptions, locationById, roomById } from '@/src/data';
+import { conditionOptions, criticalityOptions, locationById, roomById } from '@/src/data';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
-import type { AssetCondition, Criticality } from '@/src/types/models';
+import type { Asset, AssetCondition, Criticality } from '@/src/types/models';
 import { saveAuditDraft } from '@/src/services/reports';
 import { saveAuditDraftSnapshot } from '@/src/state/auditDraftStore';
+import { fetchAssetById } from '@/src/services/assets';
 import {
   type CapturedPhoto,
   captureFromCamera,
@@ -29,15 +30,14 @@ export default function AuditFormScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { assignments } = useDemoState();
-  const asset = id ? assetById[id] : undefined;
+  const [asset, setAsset] = React.useState<Asset | null>(null);
+  const [loadingAsset, setLoadingAsset] = React.useState(true);
   const assignment = assignments.find((a) => a.assetId === id);
   const isInProgress =
     assignment?.status === 'InProgress' || assignment?.status === 'DraftSaved';
   const isToDo = assignment?.status === 'Assigned';
 
-  const [condition, setCondition] = React.useState<AssetCondition | undefined>(
-    isToDo ? undefined : asset?.condition ?? 'Good'
-  );
+  const [condition, setCondition] = React.useState<AssetCondition | undefined>(undefined);
   const [criticality, setCriticality] = React.useState<Criticality | undefined>(
     isToDo ? undefined : asset?.criticality ?? 'Medium'
   );
@@ -73,6 +73,25 @@ export default function AuditFormScreen() {
   >([]);
   const [photoMessage, setPhotoMessage] = React.useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    let mounted = true;
+    if (!id) {
+      setAsset(null);
+      setLoadingAsset(false);
+      return;
+    }
+    (async () => {
+      setLoadingAsset(true);
+      const row = await fetchAssetById(id);
+      if (!mounted) return;
+      setAsset(row);
+      setLoadingAsset(false);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
 
   const persistDraftSnapshot = React.useCallback(() => {
     if (!asset) return;
@@ -149,6 +168,19 @@ export default function AuditFormScreen() {
     },
     [asset, photoBusy]
   );
+
+  if (loadingAsset) {
+    return (
+      <ScreenContainer>
+        <TopBar title="Condition Report Form" userName="Auditor" onPressBack={() => router.back()} />
+        <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
+          <SectionCard title="Loading asset">
+            <Text style={t.text.bodyMuted}>Loading asset details...</Text>
+          </SectionCard>
+        </View>
+      </ScreenContainer>
+    );
+  }
 
   if (!asset) {
     return (

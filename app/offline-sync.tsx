@@ -1,16 +1,57 @@
 import React from 'react';
 import { Text, View } from 'react-native';
+import * as Network from 'expo-network';
 import { router } from 'expo-router';
 import { Button, Card, StatusBadge } from '@/src/components';
 import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 import { useDemoState } from '@/src/state/DemoStateProvider';
+import { useWorkspace } from '@/src/state/WorkspaceProvider';
 
 function OfflineSyncContent() {
   const t = useTheme();
   const { sync: syncItems, setSync } = useDemoState();
+  const { auditorSettings, auditorSettingsReady } = useWorkspace();
   const [message, setMessage] = React.useState<string | null>(null);
+  const [autoSyncOnline, setAutoSyncOnline] = React.useState(true);
+  const [syncWifiOnly, setSyncWifiOnly] = React.useState(true);
+
+  React.useEffect(() => {
+    if (!auditorSettingsReady) return;
+    setAutoSyncOnline(auditorSettings.autoSyncOnline);
+    setSyncWifiOnly(auditorSettings.syncWifiOnly);
+  }, [auditorSettings.autoSyncOnline, auditorSettings.syncWifiOnly, auditorSettingsReady]);
+
+  const canRunSync = React.useCallback(async () => {
+    const state = await Network.getNetworkStateAsync();
+    const online = Boolean(state.isConnected && state.isInternetReachable !== false);
+    if (!online) {
+      setMessage('No internet connection detected.');
+      return false;
+    }
+    if (syncWifiOnly && state.type !== Network.NetworkStateType.WIFI) {
+      setMessage('Sync on WiFi only is enabled. Connect to WiFi to sync.');
+      return false;
+    }
+    return true;
+  }, [syncWifiOnly]);
+
+  React.useEffect(() => {
+    if (!autoSyncOnline) return;
+    let cancelled = false;
+    const run = async () => {
+      const ok = await canRunSync();
+      if (!ok || cancelled) return;
+      setSync((prev) => prev.map((item) => ({ ...item, updatedAt: new Date().toISOString() })));
+      setMessage('Auto sync completed.');
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [autoSyncOnline, canRunSync, setSync]);
 
   return (
     <ScreenContainer>
@@ -53,7 +94,7 @@ function OfflineSyncContent() {
                 </View>
                 {s.detail ? <Text style={[t.text.caption, { marginTop: t.spacing.xs }]}>{s.detail}</Text> : null}
                 <Text style={[t.text.caption, { marginTop: t.spacing.xs }]}>
-                  Updated {new Date(s.updatedAt).toLocaleString()}
+                  Updated {formatDateDDMMYYYY(s.updatedAt)}
                 </Text>
               </Card>
             );
@@ -63,7 +104,9 @@ function OfflineSyncContent() {
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           <Button
             label="Simulate upload"
-            onPress={() => {
+            onPress={async () => {
+              const ok = await canRunSync();
+              if (!ok) return;
               setSync((prev) =>
                 prev.map((item) =>
                   item.state === 'Pending' || item.state === 'Failed'
@@ -78,7 +121,9 @@ function OfflineSyncContent() {
           <Button
             label="Refresh data"
             variant="secondary"
-            onPress={() => {
+            onPress={async () => {
+              const ok = await canRunSync();
+              if (!ok) return;
               setSync((prev) => prev.map((item) => ({ ...item, updatedAt: new Date().toISOString() })));
               setMessage('Offline sync state refreshed.');
             }}

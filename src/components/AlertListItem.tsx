@@ -4,6 +4,7 @@ import { Pressable, Text, View } from 'react-native';
 import { useTheme } from '@/src/theme';
 import type { AlertItem } from '@/src/types/models';
 import { StatusBadge } from './StatusBadge';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 
 function iconForKind(kind: AlertItem['kind']): React.ComponentProps<typeof FontAwesome>['name'] {
   if (kind === 'CriticalCondition') return 'exclamation-triangle';
@@ -70,7 +71,7 @@ export function AlertListItem({
               <Text style={{ fontWeight: '800', color: t.colors.text.primary }}>{item.title}</Text>
               {completed ? (
                 <Text style={{ color: t.colors.status.good, fontSize: 12, fontWeight: '700' }}>
-                  Completed {new Date(item.completedAt as string).toLocaleDateString()}
+                  Completed {formatDateDDMMYYYY(item.completedAt as string)}
                 </Text>
               ) : null}
             </View>
@@ -79,7 +80,7 @@ export function AlertListItem({
             </Text>
             <Text style={[t.text.caption, { marginTop: 2 }]}>{item.body}</Text>
             <Text style={[t.text.caption, { marginTop: 6 }]}>
-              {new Date(item.createdAt).toLocaleString()}
+              {formatDateDDMMYYYY(item.createdAt)}
             </Text>
           </View>
         </View>

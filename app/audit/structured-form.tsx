@@ -16,7 +16,13 @@ export default function StructuredConditionReportScreen() {
   const [reportId] = React.useState(`CR-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`);
   const [assessorName, setAssessorName] = React.useState('Auditor');
   const [assessorRole, setAssessorRole] = React.useState('Asset Auditor');
-  const [assessmentDate, setAssessmentDate] = React.useState(new Date().toISOString().slice(0, 10));
+  const [assessmentDate, setAssessmentDate] = React.useState(() => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    return `${day}/${month}/${year}`;
+  });
   const [department, setDepartment] = React.useState('Animal Care');
   const [location, setLocation] = React.useState('');
   const [roomOrZone, setRoomOrZone] = React.useState('');
@@ -87,7 +93,7 @@ export default function StructuredConditionReportScreen() {
             </View>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
               <View style={{ flex: 1 }}>
-                <FormField label="Assessment date (YYYY-MM-DD)" value={assessmentDate} onChangeText={setAssessmentDate} />
+                <FormField label="Assessment date (DD/MM/YYYY)" value={assessmentDate} onChangeText={setAssessmentDate} />
               </View>
               <View style={{ flex: 1 }}>
                 <FormField label="Department" value={department} onChangeText={setDepartment} />
@@ -286,7 +292,7 @@ export default function StructuredConditionReportScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <FormField
-                    label="Sign-off date (YYYY-MM-DD)"
+                    label="Sign-off date (DD/MM/YYYY)"
                     value={signOffDate}
                     onChangeText={setSignOffDate}
                   />

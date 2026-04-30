@@ -1,27 +1,32 @@
 import React from 'react';
 import { router } from 'expo-router';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { Button, Card, SummaryStatCard } from '@/src/components';
 import { Calendar } from 'react-native-calendars';
-import {
-  adminAlerts,
-  adminLocationById,
-  adminSyncItems,
-  adminUserById,
-} from '@/src/data/admin';
 import { AdminScreenScaffold } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 import { fetchAdminReports } from '@/src/services/reports';
-import { fetchAdminAlerts, fetchAdminSyncItems } from '@/src/services/systemData';
+import {
+  fetchAdminActivityTimeline,
+  fetchAdminAlerts,
+  fetchAdminSyncItems,
+  type AdminActivityItem,
+} from '@/src/services/systemData';
 import type { AdminAlertRecord, AdminReportRecord, AdminSyncRecord } from '@/src/data/admin';
+import { resolveLocationNames, resolveUserNames } from '@/src/services/lookups';
 
 export default function AdminDashboardScreen() {
   const t = useTheme();
   const [reports, setReports] = React.useState<AdminReportRecord[]>([]);
-  const [alerts, setAlerts] = React.useState<AdminAlertRecord[]>(adminAlerts);
-  const [syncItems, setSyncItems] = React.useState<AdminSyncRecord[]>(adminSyncItems);
+  const [alerts, setAlerts] = React.useState<AdminAlertRecord[]>([]);
+  const [syncItems, setSyncItems] = React.useState<AdminSyncRecord[]>([]);
+  const [activityTimeline, setActivityTimeline] = React.useState<AdminActivityItem[]>([]);
+  const [userNameById, setUserNameById] = React.useState<Record<string, string>>({});
+  const [locationNameById, setLocationNameById] = React.useState<Record<string, string>>({});
   const [selectedCalendarDate, setSelectedCalendarDate] = React.useState<string | null>(null);
   const [dayModalOpen, setDayModalOpen] = React.useState(false);
+  const [loadingDashboard, setLoadingDashboard] = React.useState(true);
   const assigned = reports.filter((r) => r.status === 'ToDo').length;
   const now = Date.now();
   const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
@@ -33,13 +38,7 @@ export default function AdminDashboardScreen() {
   const critical = alerts.filter((a) => a.status === 'Open').length;
   const automations = syncItems.filter((s) => s.state !== 'UpToDate').length;
 
-  const recentActivity = [...reports]
-    .sort(
-      (a, b) =>
-        new Date(b.submittedAt ?? b.dueDate).getTime() -
-        new Date(a.submittedAt ?? a.dueDate).getTime()
-    )
-    .slice(0, 5);
+  const recentActivity = activityTimeline.slice(0, 5);
 
   const dateKey = (value?: string) => (value ?? '').slice(0, 10);
 
@@ -123,14 +122,42 @@ export default function AdminDashboardScreen() {
   const selectedReportsDue = selectedCalendarDate ? (reportsDueByDate[selectedCalendarDate] ?? []) : [];
   React.useEffect(() => {
     (async () => {
-      const data = await fetchAdminReports();
-      const alertRows = await fetchAdminAlerts();
-      const syncRows = await fetchAdminSyncItems();
+      const [data, alertRows, syncRows, timelineRows] = await Promise.all([
+        fetchAdminReports(),
+        fetchAdminAlerts(),
+        fetchAdminSyncItems(),
+        fetchAdminActivityTimeline(30),
+      ]);
       setReports(data);
       setAlerts(alertRows);
       setSyncItems(syncRows);
+      setActivityTimeline(timelineRows);
+      setLoadingDashboard(false);
     })();
   }, []);
+
+  React.useEffect(() => {
+    (async () => {
+      const userIds = Array.from(
+        new Set([
+          ...reports.map((report) => report.assignedUserId).filter(Boolean),
+          ...activityTimeline.map((activity) => activity.userId).filter(Boolean),
+        ])
+      );
+      const locationIds = Array.from(
+        new Set([
+          ...reports.map((report) => report.locationId).filter(Boolean),
+          ...activityTimeline.map((activity) => activity.locationId).filter(Boolean),
+        ])
+      );
+      const [users, locations] = await Promise.all([
+        userIds.length ? resolveUserNames(userIds) : Promise.resolve({}),
+        locationIds.length ? resolveLocationNames(locationIds) : Promise.resolve({}),
+      ]);
+      setUserNameById(users);
+      setLocationNameById(locations);
+    })();
+  }, [activityTimeline, reports]);
 
   const selectedCompleted = selectedCalendarDate ? (completedByDate[selectedCalendarDate] ?? []) : [];
   const selectedUrgentAlerts = selectedCalendarDate ? (urgentAlertsByDate[selectedCalendarDate] ?? []) : [];
@@ -152,6 +179,12 @@ export default function AdminDashboardScreen() {
         <SummaryStatCard label="Critical" value={`${critical}`} icon="warning" hint="Open alerts" />
         <SummaryStatCard label="Automations" value={`${automations}`} icon="refresh" hint="Needs attention" />
       </View>
+      {loadingDashboard ? (
+        <View style={{ minHeight: 100, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <ActivityIndicator size="small" color={t.colors.brand.forest} />
+          <Text style={t.text.caption}>Loading dashboard data...</Text>
+        </View>
+      ) : null}
 
       <View style={{ height: t.spacing.xl }} />
       <Card>
@@ -213,24 +246,32 @@ export default function AdminDashboardScreen() {
           Latest report movements across teams.
         </Text>
         <View style={{ gap: t.spacing.sm }}>
-          {recentActivity.map((report) => (
-            <View
-              key={report.id}
-              style={{
-                borderWidth: 1,
-                borderColor: t.colors.border.subtle,
-                backgroundColor: t.colors.card.surfaceAlt,
-                borderRadius: t.radius.md,
-                paddingHorizontal: t.spacing.md,
-                paddingVertical: t.spacing.sm,
-              }}>
-              <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{report.title}</Text>
-              <Text style={[t.text.caption, { marginTop: 2 }]}>
-                {adminUserById[report.assignedUserId]?.name ?? 'Unknown user'} · {report.status} ·{' '}
-                {new Date(report.submittedAt ?? report.dueDate).toLocaleDateString()}
-              </Text>
-            </View>
-          ))}
+          {recentActivity.length === 0 ? (
+            <Text style={t.text.caption}>No recent activity yet.</Text>
+          ) : (
+            recentActivity.map((item) => (
+              <View
+                key={item.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: t.colors.border.subtle,
+                  backgroundColor: t.colors.card.surfaceAlt,
+                  borderRadius: t.radius.md,
+                  paddingHorizontal: t.spacing.md,
+                  paddingVertical: t.spacing.sm,
+                }}>
+                <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{item.title}</Text>
+                <Text style={[t.text.caption, { marginTop: 2 }]}>
+                  {item.userId ? `${userNameById[item.userId] ?? 'Unknown user'} · ` : ''}
+                  {item.locationId ? `${locationNameById[item.locationId] ?? 'Unknown location'} · ` : ''}
+                  {item.detail}
+                </Text>
+                <Text style={[t.text.caption, { marginTop: 2 }]}>
+                  {formatDateDDMMYYYY(item.createdAt)}
+                </Text>
+              </View>
+            ))
+          )}
         </View>
       </Card>
 
@@ -265,7 +306,7 @@ export default function AdminDashboardScreen() {
                 borderBottomColor: t.colors.border.subtle,
               }}>
               <Text style={[t.text.caption, { fontWeight: '700' }]}>
-                {selectedCalendarDate ? new Date(selectedCalendarDate).toLocaleDateString() : 'Day details'}
+                {selectedCalendarDate ? formatDateDDMMYYYY(selectedCalendarDate) : 'Day details'}
               </Text>
               <Pressable onPress={() => setDayModalOpen(false)}>
                 <Text style={{ color: t.colors.brand.forest, fontWeight: '700' }}>Done</Text>
@@ -283,8 +324,8 @@ export default function AdminDashboardScreen() {
                   <Text style={[t.text.caption, { fontWeight: '700' }]}>Services due</Text>
                   {selectedReportsDue.map((report) => (
                     <Text key={report.id} style={t.text.caption}>
-                      {report.title} · {adminUserById[report.assignedUserId]?.name ?? 'Unknown'} ·{' '}
-                      {adminLocationById[report.locationId]?.name ?? 'Unknown location'}
+                      {report.title} · {userNameById[report.assignedUserId] ?? 'Unknown'} ·{' '}
+                      {locationNameById[report.locationId] ?? 'Unknown location'}
                     </Text>
                   ))}
                 </View>

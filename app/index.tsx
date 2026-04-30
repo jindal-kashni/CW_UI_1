@@ -22,21 +22,18 @@ export default function LoginScreen() {
 
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
+  const [showPassword, setShowPassword] = React.useState(false);
   const [remember, setRemember] = React.useState(true);
   const [roleError, setRoleError] = React.useState('');
   const [loading, setLoading] = React.useState(false);
 
   const resolveRoleWithRetry = React.useCallback(async (initialUser: User | null) => {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       const directRole = await resolveRoleForUser(initialUser ?? null);
       if (directRole) return directRole;
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionRole = await resolveRoleForUser(sessionData.session?.user ?? null);
-      if (sessionRole) return sessionRole;
-
-      if (attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+      if (attempt < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
       }
     }
     return null;
@@ -79,6 +76,7 @@ export default function LoginScreen() {
 
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
+    const usedTemporaryPassword = trimmedPassword === 'Currumbin2026!';
 
     if (!trimmedEmail || !trimmedPassword) {
       setRoleError('Enter your email and password.');
@@ -86,43 +84,60 @@ export default function LoginScreen() {
     }
 
     setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password: trimmedPassword,
+      });
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password: trimmedPassword,
-    });
+      if (error) {
+        setLoading(false);
+        setRoleError(error.message);
+        return;
+      }
 
-    if (error) {
+      const resolvedRole = await resolveRoleWithRetry(data.user ?? null);
+      if (!resolvedRole) {
+        setLoading(false);
+        const diagnosis = await diagnoseRoleLookup(data.user ?? null);
+        setRoleError(
+          diagnosis
+            ? `Role lookup failed: ${diagnosis}`
+            : 'Role lookup failed for an unknown reason. Please try again.'
+        );
+        await supabase.auth.signOut();
+        return;
+      }
+
+      if (resolvedRole === 'admin') {
+        setRole('admin');
+        setLoading(false);
+      const mustResetPassword = Boolean(data.user?.user_metadata?.must_reset_password);
+        if (mustResetPassword || usedTemporaryPassword) {
+        router.replace('/update-password?first=1' as any);
+        return;
+      }
+        router.replace('/admin' as any);
+        fetchAssets({ offset: 0, limit: 20 }).catch(() => undefined);
+        return;
+      }
+      setRole('auditor');
       setLoading(false);
-      setRoleError(error.message);
+    const mustResetPassword = Boolean(data.user?.user_metadata?.must_reset_password);
+      if (mustResetPassword || usedTemporaryPassword) {
+      router.replace('/update-password?first=1' as any);
       return;
     }
-
-    const resolvedRole = await resolveRoleWithRetry(data.user ?? null);
-    if (!resolvedRole) {
+      router.replace('/audit/history' as any);
+    } catch (err) {
       setLoading(false);
-      const diagnosis = await diagnoseRoleLookup(data.user ?? null);
+      const message = err instanceof Error ? err.message : 'Unknown error';
       setRoleError(
-        diagnosis
-          ? `Role lookup failed: ${diagnosis}`
-          : 'Role lookup failed for an unknown reason. Please try again.'
+        message.toLowerCase().includes('load failed')
+          ? 'Network error while contacting Supabase. Please retry in a few seconds.'
+          : `Sign-in failed: ${message}`
       );
-      await supabase.auth.signOut();
-      return;
     }
-
-    if (resolvedRole === 'admin') {
-      try {
-        await fetchAssets({ offset: 0, limit: 20 });
-      } catch {}
-      setRole('admin');
-      setLoading(false);
-      router.replace('/admin' as any);
-      return;
-    }
-    setRole('auditor');
-    setLoading(false);
-    router.replace('/audit/history' as any);
   };
 
   return (
@@ -238,11 +253,20 @@ export default function LoginScreen() {
                 onChangeText={setPassword}
                 placeholder="••••••••"
                 placeholderTextColor={t.colors.text.muted}
-                secureTextEntry
+                secureTextEntry={!showPassword}
                 style={{ flex: 1, fontSize: 16, color: t.colors.text.primary }}
                 editable={!loading}
               />
-              <FontAwesome name="eye" size={16} color={t.colors.text.muted} />
+              <Pressable
+                onPress={() => setShowPassword((prev) => !prev)}
+                hitSlop={8}
+                disabled={loading}>
+                <FontAwesome
+                  name={showPassword ? 'eye-slash' : 'eye'}
+                  size={16}
+                  color={t.colors.text.muted}
+                />
+              </Pressable>
             </View>
           </View>
 

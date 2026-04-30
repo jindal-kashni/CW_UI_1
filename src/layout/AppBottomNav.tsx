@@ -1,28 +1,41 @@
 import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { usePathname, router } from 'expo-router';
-import { Pressable, Text, View } from 'react-native';
+import { Modal, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/src/theme';
+import { getAuditorSettingsDirty } from '@/src/state/auditorSettingsDraftGuard';
 
 /** Auditor workspace tab bar only (separate from admin app). */
 const AUDITOR_BASE = '/audit' as const;
 const items = [
   { key: 'audits', label: 'Your Reports', icon: 'check-square-o', href: `${AUDITOR_BASE}/history` },
   { key: 'assets', label: 'Assets', icon: 'th-large', href: `${AUDITOR_BASE}/assets` },
-  { key: 'settings', label: 'Settings', icon: 'cog', href: '/profile' },
+  { key: 'settings', label: 'Settings', icon: 'cog', href: `${AUDITOR_BASE}/settings` },
 ] as const;
 
 function isActive(pathname: string, key: 'audits' | 'assets' | 'settings') {
-  if (key === 'assets') return pathname.includes('/assets') && !pathname.includes('/alerts');
-  if (key === 'audits') return pathname.includes('/audit') || pathname.includes('/audits');
-  if (key === 'settings') return pathname.includes('/settings') || pathname.includes('/profile');
+  if (key === 'assets') {
+    return pathname === '/audit/assets' || pathname.startsWith('/audit/form/') || pathname.startsWith('/asset/');
+  }
+  if (key === 'audits') {
+    return (
+      pathname === '/audit/history' ||
+      pathname.startsWith('/audit/history/') ||
+      pathname.startsWith('/audit/report/') ||
+      pathname.startsWith('/audit/review/') ||
+      pathname.startsWith('/audit/structured-form') ||
+      pathname === '/audits'
+    );
+  }
+  if (key === 'settings') return pathname === '/audit/settings' || pathname.startsWith('/audit/settings');
   return false;
 }
 
 export function AppBottomNav() {
   const t = useTheme();
   const pathname = usePathname();
+  const [showUnsavedModal, setShowUnsavedModal] = React.useState(false);
   const navItems = items;
   const headerGreen = '#004A26';
   const navBg = '#F7F6F2';
@@ -51,7 +64,14 @@ export function AppBottomNav() {
             return (
               <Pressable
                 key={item.key}
-                onPress={() => router.replace(item.href as any)}
+                onPress={() => {
+                  const leavingAuditSettings = pathname === '/audit/settings' && item.href !== '/audit/settings';
+                  if (leavingAuditSettings && getAuditorSettingsDirty()) {
+                    setShowUnsavedModal(true);
+                    return;
+                  }
+                  router.replace(item.href as any);
+                }}
                 style={({ pressed }) => [
                   {
                     flex: 1,
@@ -90,6 +110,51 @@ export function AppBottomNav() {
           })}
         </View>
       </View>
+      <Modal
+        visible={showUnsavedModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowUnsavedModal(false)}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.25)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: t.spacing.xl,
+          }}>
+          <View
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              backgroundColor: '#FFFFFF',
+              borderRadius: t.radius.lg,
+              borderWidth: 1,
+              borderColor: 'rgba(30,31,28,0.10)',
+              padding: t.spacing.lg,
+              gap: t.spacing.md,
+            }}>
+            <Text style={[t.text.title, { fontSize: 18, lineHeight: 24 }]}>Unsaved changes</Text>
+            <Text style={t.text.bodyMuted}>You need to save your changes before leaving this page.</Text>
+            <Pressable
+              onPress={() => setShowUnsavedModal(false)}
+              style={({ pressed }) => [
+                {
+                  marginTop: t.spacing.xs,
+                  minHeight: 42,
+                  borderRadius: t.radius.lg,
+                  borderWidth: 1,
+                  borderColor: '#2F6B4B',
+                  backgroundColor: pressed ? '#285E42' : '#2F6B4B',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                },
+              ]}>
+              <Text style={{ color: '#fff', fontWeight: '700' }}>OK</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

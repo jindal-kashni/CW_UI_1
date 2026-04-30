@@ -1,73 +1,277 @@
 import React from 'react';
-import { Pressable, Switch, Text, View } from 'react-native';
-import { Button } from '@/src/components';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Switch, Text, View, Platform } from 'react-native';
+import { useNavigation } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AdminScreenScaffold } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { useWorkspace } from '@/src/state/WorkspaceProvider';
+import {
+  defaultAdminSettings,
+  fetchAdminSettings,
+  saveAdminSettings,
+  type AdminSettings,
+} from '@/src/services/settings';
 
 export default function AdminSettingsPage() {
   const t = useTheme();
-  const [autoSyncOnline, setAutoSyncOnline] = React.useState(true);
-  const [syncWifiOnly, setSyncWifiOnly] = React.useState(true);
-  const [pushNotifications, setPushNotifications] = React.useState(false);
-  const [actionMessage, setActionMessage] = React.useState<string | null>(null);
-  const [displayMode, setDisplayMode] = React.useState<'Light' | 'Dark'>('Light');
+  const navigation = useNavigation();
+  const { user } = useWorkspace();
+  const [settings, setSettings] = React.useState<AdminSettings>(defaultAdminSettings);
+  const [saved, setSaved] = React.useState<AdminSettings>(defaultAdminSettings);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [loadingSettings, setLoadingSettings] = React.useState(true);
+  const dirty = JSON.stringify(settings) !== JSON.stringify(saved);
+
+  React.useEffect(() => {
+    (async () => {
+      const loaded = await fetchAdminSettings(user?.id);
+      setSettings(loaded);
+      setSaved(loaded);
+      setLoadingSettings(false);
+    })();
+  }, [user?.id]);
+
+  const saveNow = React.useCallback(async () => {
+    if (!user?.id) {
+      setMessage('Please sign in again.');
+      return false;
+    }
+    setSaving(true);
+    const result = await saveAdminSettings(user.id, settings);
+    setSaving(false);
+    if (!result.ok) {
+      setMessage(result.error);
+      return false;
+    }
+    setSaved(settings);
+    setMessage('Settings saved.');
+    return true;
+  }, [settings, user?.id]);
+
+  React.useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e: any) => {
+      if (!dirty) return;
+      e.preventDefault();
+      Alert.alert('Unsaved changes', 'You need to save your changes before leaving this page.', [
+        { text: 'Keep editing', style: 'cancel' },
+        {
+          text: 'Save now',
+          onPress: async () => {
+            const ok = await saveNow();
+            if (ok) navigation.dispatch(e.data.action);
+          },
+        },
+      ]);
+    });
+    return unsub;
+  }, [dirty, navigation, saveNow]);
+
+  React.useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 
   const trackColor = { false: 'rgba(30,31,28,0.15)', true: '#2F6B4B' };
 
   return (
-    <AdminScreenScaffold title="Settings">
-      <Text style={[t.text.title, { fontSize: 28, lineHeight: 34, marginBottom: t.spacing.xs }]}>Settings</Text>
-      <Text style={[t.text.caption, { marginBottom: t.spacing.xl }]}>
-        Manage notifications, display, and sync preferences.
-      </Text>
-      <View style={{ gap: t.spacing.md }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={t.text.bodyMuted}>Push notifications</Text>
-          <Switch value={pushNotifications} onValueChange={setPushNotifications} trackColor={trackColor} thumbColor="#F8F7F3" />
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={t.text.bodyMuted}>Auto sync when online</Text>
-          <Switch value={autoSyncOnline} onValueChange={setAutoSyncOnline} trackColor={trackColor} thumbColor="#F8F7F3" />
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={t.text.bodyMuted}>Sync on WiFi only</Text>
-          <Switch value={syncWifiOnly} onValueChange={setSyncWifiOnly} trackColor={trackColor} thumbColor="#F8F7F3" />
-        </View>
+    <AdminScreenScaffold title="Settings" scroll={false}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingBottom: t.spacing.xxxl,
+          gap: t.spacing.lg,
+        }}
+        showsVerticalScrollIndicator={false}>
+        <Text style={[t.text.title, { fontSize: 28, lineHeight: 34 }]}>Admin Settings</Text>
+        <Text style={[t.text.caption, { marginTop: -4 }]}>
+          Manage sync, alerts and admin workspace preferences.
+        </Text>
+        {loadingSettings ? (
+          <View style={{ minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <ActivityIndicator size="small" color={t.colors.brand.forest} />
+            <Text style={t.text.caption}>Loading your saved settings...</Text>
+          </View>
+        ) : (
+          <>
+            <View style={{ gap: t.spacing.md }}>
+              <ToggleRow
+                label="Push notifications (in-app)"
+                value={settings.pushNotifications}
+                onValueChange={(value) => setSettings((prev) => ({ ...prev, pushNotifications: value }))}
+                trackColor={trackColor}
+              />
+              <ToggleRow
+                label="Auto sync when online"
+                value={settings.autoSyncOnline}
+                onValueChange={(value) => setSettings((prev) => ({ ...prev, autoSyncOnline: value }))}
+                trackColor={trackColor}
+              />
+              <ToggleRow
+                label="Sync on WiFi only"
+                value={settings.syncWifiOnly}
+                onValueChange={(value) => setSettings((prev) => ({ ...prev, syncWifiOnly: value }))}
+                trackColor={trackColor}
+              />
+              <ToggleRow
+                label="Due urgency indicators"
+                value={settings.dueUrgencyIndicators}
+                onValueChange={(value) => setSettings((prev) => ({ ...prev, dueUrgencyIndicators: value }))}
+                trackColor={trackColor}
+              />
+              <ToggleRow
+                label="Large touch targets"
+                value={settings.largeTouchTargets}
+                onValueChange={(value) => setSettings((prev) => ({ ...prev, largeTouchTargets: value }))}
+                trackColor={trackColor}
+              />
+            </View>
 
-        <View style={{ marginTop: t.spacing.md }}>
-          <Text style={t.text.caption}>Display mode</Text>
-          <View style={{ flexDirection: 'row', gap: t.spacing.md, marginTop: 6 }}>
-            {(['Light', 'Dark'] as const).map((mode) => {
-              const selected = displayMode === mode;
-              return (
-                <Pressable
-                  key={mode}
-                  onPress={() => setDisplayMode(mode)}
-                  style={{
+            <ChoiceRow
+              title="Default admin section"
+              options={[
+                { label: 'Users', value: 'users' },
+                { label: 'Locations', value: 'locations' },
+                { label: 'Reports', value: 'reports' },
+                { label: 'Assets', value: 'assets' },
+              ]}
+              value={settings.defaultAdminSection}
+              onChange={(value) => setSettings((prev) => ({ ...prev, defaultAdminSection: value as any }))}
+            />
+            <ChoiceRow
+              title="Reminder frequency"
+              options={[
+                { label: 'Off', value: 'off' },
+                { label: 'Daily', value: 'daily' },
+                { label: 'Every 2 days', value: 'every_2_days' },
+              ]}
+              value={settings.reminderFrequency}
+              onChange={(value) => setSettings((prev) => ({ ...prev, reminderFrequency: value as any }))}
+            />
+
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <Pressable
+                onPress={async () => {
+                  const keys = await AsyncStorage.getAllKeys();
+                  const removable = keys.filter(
+                    (key) =>
+                      key.startsWith('audit-reminder-last-') ||
+                      key.startsWith('offline-sync-') ||
+                      key.startsWith('asset-cache-')
+                  );
+                  if (removable.length > 0) {
+                    await AsyncStorage.multiRemove(removable);
+                  }
+                  setMessage('Cached offline data cleared.');
+                }}
+                style={({ pressed }) => [
+                  {
                     flex: 1,
                     minHeight: 42,
                     borderRadius: t.radius.lg,
                     borderWidth: 1,
-                    borderColor: selected ? 'rgba(47,107,75,0.58)' : 'rgba(0,74,38,0.22)',
-                    backgroundColor: selected ? '#2F6B4B' : t.colors.card.surface,
+                    borderColor: 'rgba(0,74,38,0.22)',
+                    backgroundColor: pressed ? 'rgba(0,74,38,0.08)' : t.colors.card.surface,
                     alignItems: 'center',
                     justifyContent: 'center',
-                  }}>
-                  <Text style={{ color: selected ? '#fff' : '#2F5B45', fontWeight: '700' }}>{mode}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
+                  },
+                ]}>
+                <Text style={{ color: '#2F5B45', fontWeight: '700' }}>Clear cached data</Text>
+              </Pressable>
+              <Pressable
+                onPress={saveNow}
+                disabled={saving}
+                style={({ pressed }) => [
+                  {
+                    flex: 1,
+                    minHeight: 42,
+                    borderRadius: t.radius.lg,
+                    borderWidth: 1,
+                    borderColor: '#2F6B4B',
+                    backgroundColor: '#2F6B4B',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed || saving ? 0.9 : 1,
+                  },
+                ]}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>{saving ? 'Saving...' : 'Save settings'}</Text>
+              </Pressable>
+            </View>
 
-        <Button
-          label="Clear cached data"
-          variant="secondary"
-          onPress={() => setActionMessage('Cached offline data cleared.')}
-        />
-        {actionMessage ? <Text style={[t.text.caption, { color: '#2F5B45' }]}>{actionMessage}</Text> : null}
-      </View>
+            {message ? <Text style={[t.text.caption, { color: '#2F5B45' }]}>{message}</Text> : null}
+            {dirty ? <Text style={[t.text.caption, { color: '#B63E34' }]}>You have unsaved changes.</Text> : null}
+          </>
+        )}
+      </ScrollView>
     </AdminScreenScaffold>
+  );
+}
+
+function ToggleRow({
+  label,
+  value,
+  onValueChange,
+  trackColor,
+}: {
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  trackColor: { false: string; true: string };
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+      <Text style={t.text.bodyMuted}>{label}</Text>
+      <Switch value={value} onValueChange={onValueChange} trackColor={trackColor} thumbColor="#F8F7F3" />
+    </View>
+  );
+}
+
+function ChoiceRow({
+  title,
+  options,
+  value,
+  onChange,
+}: {
+  title: string;
+  options: { label: string; value: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const t = useTheme();
+  return (
+    <View>
+      <Text style={t.text.caption}>{title}</Text>
+      <View style={{ flexDirection: 'row', gap: t.spacing.sm, marginTop: 6, flexWrap: 'wrap' }}>
+        {options.map((option) => {
+          const selected = value === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => onChange(option.value)}
+              style={({ pressed }) => [
+                {
+                  minHeight: 36,
+                  borderRadius: 999,
+                  paddingHorizontal: 12,
+                  borderWidth: 1,
+                  borderColor: selected ? 'rgba(47,107,75,0.58)' : 'rgba(0,74,38,0.22)',
+                  backgroundColor: selected ? '#2F6B4B' : pressed ? 'rgba(0,74,38,0.08)' : '#FBF7F0',
+                  justifyContent: 'center',
+                },
+              ]}>
+              <Text style={{ color: selected ? '#fff' : '#2F5B45', fontWeight: '700' }}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 

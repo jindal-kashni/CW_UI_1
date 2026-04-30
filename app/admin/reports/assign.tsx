@@ -2,13 +2,19 @@ import React from 'react';
 import { router } from 'expo-router';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Button } from '@/src/components';
-import { assets, locationById } from '@/src/data';
-import { adminUsers } from '@/src/data/admin';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { Assessor, AuditAssignment } from '@/src/types/models';
+import type { Asset } from '@/src/types/models';
+import { fetchAssets } from '@/src/services/assets';
+import { fetchAdminUsers } from '@/src/services/users';
+import { createAuditAssignmentsBulk, fetchAuditAssignments } from '@/src/services/reports';
+import type { AdminUserRecord } from '@/src/data/admin';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
+import { resolveLocationNames } from '@/src/services/lookups';
 
 type PickerField = 'location' | 'user' | null;
 
@@ -24,18 +30,50 @@ function toAssessor(user: { id: string; name: string }): Assessor {
 export default function AdminAssignReportPage() {
   const t = useTheme();
   const { setAssignments } = useDemoState();
+  const [assetRows, setAssetRows] = React.useState<Asset[]>([]);
+  const [users, setUsers] = React.useState<AdminUserRecord[]>([]);
+  const [assigning, setAssigning] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [locationNameById, setLocationNameById] = React.useState<Record<string, string>>({});
 
-  const locationOptions = React.useMemo(() => {
-    const options = Object.values(locationById).map((location) => ({
-      value: location.id,
-      label: location.name,
-    }));
-    return options.sort((a, b) => a.label.localeCompare(b.label));
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const [assetsData, usersData] = await Promise.all([fetchAssets({ limit: 5000 }), fetchAdminUsers()]);
+      if (!mounted) return;
+      setAssetRows(assetsData);
+      setUsers(usersData);
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
+  React.useEffect(() => {
+    (async () => {
+      const ids = Array.from(new Set(assetRows.map((asset) => asset.location_id).filter(Boolean)));
+      if (ids.length === 0) return;
+      const names = await resolveLocationNames(ids);
+      setLocationNameById(names);
+    })();
+  }, [assetRows]);
+
+  const locationOptions = React.useMemo(() => {
+    const seen = new Set<string>();
+    const options = assetRows
+      .map((asset) => asset.location_id)
+      .filter((id) => {
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .map((id) => ({ value: id, label: locationNameById[id] ?? id }));
+    return options.sort((a, b) => a.label.localeCompare(b.label));
+  }, [assetRows, locationNameById]);
+
   const activeAuditors = React.useMemo(
-    () => adminUsers.filter((user) => user.role === 'Auditor' && user.status === 'Active'),
-    []
+    () => users.filter((user) => user.role === 'Auditor' && user.status === 'Active'),
+    [users]
   );
 
   const [selectedLocationId, setSelectedLocationId] = React.useState<string>(locationOptions[0]?.value ?? '');
@@ -43,17 +81,35 @@ export default function AdminAssignReportPage() {
   const [pickerField, setPickerField] = React.useState<PickerField>(null);
   const [pickerDraftValue, setPickerDraftValue] = React.useState<string>('');
   const [selectedAssetIds, setSelectedAssetIds] = React.useState<string[]>([]);
+  const [showDueDatePicker, setShowDueDatePicker] = React.useState(false);
+  const [selectedDueDate, setSelectedDueDate] = React.useState(() => {
+    const due = new Date();
+    due.setDate(due.getDate() + 7);
+    return due;
+  });
+
+  React.useEffect(() => {
+    if (!selectedLocationId && locationOptions[0]?.value) {
+      setSelectedLocationId(locationOptions[0].value);
+    }
+  }, [locationOptions, selectedLocationId]);
+
+  React.useEffect(() => {
+    if (!selectedUserId && activeAuditors[0]?.id) {
+      setSelectedUserId(activeAuditors[0].id);
+    }
+  }, [activeAuditors, selectedUserId]);
 
   const assetsInLocation = React.useMemo(
-    () => assets.filter((asset) => asset.location_id === selectedLocationId),
-    [selectedLocationId]
+    () => assetRows.filter((asset) => asset.location_id === selectedLocationId),
+    [assetRows, selectedLocationId]
   );
 
   React.useEffect(() => {
     setSelectedAssetIds([]);
   }, [selectedLocationId]);
 
-  const selectedLocationName = locationById[selectedLocationId]?.name ?? '';
+  const selectedLocationName = locationNameById[selectedLocationId] ?? '';
   const selectedUser = activeAuditors.find((user) => user.id === selectedUserId);
   const allSelected = assetsInLocation.length > 0 && selectedAssetIds.length === assetsInLocation.length;
 
@@ -82,38 +138,40 @@ export default function AdminAssignReportPage() {
     setSelectedAssetIds(assetsInLocation.map((asset) => asset.id));
   };
 
-  const onAssign = () => {
+  const onAssign = async () => {
+    setMessage(null);
     const user = activeAuditors.find((item) => item.id === selectedUserId);
-    if (!user || selectedAssetIds.length === 0) return;
-
-    const due = new Date();
-    due.setDate(due.getDate() + 7);
-    const dueAt = due.toISOString().slice(0, 10);
-
-    const newAssignments: AuditAssignment[] = selectedAssetIds.map((assetId) => {
-      const asset = assets.find((item) => item.id === assetId)!;
-      const location = locationById[asset.location_id];
-      return {
-        id: `aud-assign-${asset.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        title: `Condition Report Task · ${asset.asset_code}`,
-        dueAt,
-        locationScope: { precincts: [location?.precinct ?? 'Central Precinct'] },
-        assetId: asset.id,
-        status: 'Assigned',
-        progressPct: 0,
+    if (!user) {
+      setMessage('Please select an active Auditor to assign reports.');
+      return;
+    }
+    if (selectedAssetIds.length === 0) return;
+    setAssigning(true);
+    const result = await createAuditAssignmentsBulk({
+      assignedUserId: user.id,
+      assetIds: selectedAssetIds,
+      dueAt: selectedDueDate.toISOString(),
+    });
+    if (!result.ok) {
+      setAssigning(false);
+      setMessage(result.error ?? 'Could not assign reports.');
+      return;
+    }
+    const refreshed = await fetchAuditAssignments();
+    if (refreshed.length > 0) {
+      setAssignments(refreshed);
+    } else if (result.created) {
+      const newAssignments: AuditAssignment[] = result.created.map((assignment) => ({
+        ...assignment,
         assignedTo: toAssessor(user),
-        summary: `Condition report for ${asset.name} (${asset.asset_code}). Assigned by admin.`,
-      };
-    });
-
-    setAssignments((prev) => {
-      const openStates: AuditAssignment['status'][] = ['Assigned', 'InProgress', 'DraftSaved'];
-      const selectedSet = new Set(selectedAssetIds);
-      const untouched = prev.filter((assignment) => !(selectedSet.has(assignment.assetId) && openStates.includes(assignment.status)));
-      return [...untouched, ...newAssignments];
-    });
-
-    router.replace('/admin/reports/assign' as any);
+      }));
+      setAssignments((prev) => [...prev, ...newAssignments]);
+    }
+    setAssigning(false);
+    setSelectedAssetIds([]);
+    setMessage(
+      `${result.created?.length ?? selectedAssetIds.length} report assignments created and sent to auditor notifications.`
+    );
   };
 
   return (
@@ -121,7 +179,6 @@ export default function AdminAssignReportPage() {
       <TopBar
         title="Assign report"
         userName="Admin"
-        onPressBack={() => router.replace('/admin/reports/assign' as any)}
         onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
@@ -258,21 +315,33 @@ export default function AdminAssignReportPage() {
         <SelectionField
           label="Delegate to"
           value={selectedUser?.name ?? ''}
-          placeholder="Select auditor"
+          placeholder={activeAuditors.length === 0 ? 'No active auditors available' : 'Select auditor'}
           onPress={() => {
+            if (activeAuditors.length === 0) return;
             setPickerDraftValue(selectedUserId);
             setPickerField('user');
           }}
+        />
+        <SelectionField
+          label="Due date"
+          value={formatDateDDMMYYYY(selectedDueDate.toISOString())}
+          placeholder="Select due date"
+          onPress={() => setShowDueDatePicker(true)}
         />
 
         <Text style={t.text.caption}>
           {selectedAssetIds.length} asset{selectedAssetIds.length === 1 ? '' : 's'} selected
         </Text>
+        {message ? (
+          <Text style={[t.text.caption, { color: message.includes('created') ? '#2F5B45' : '#B63E34' }]}>
+            {message}
+          </Text>
+        ) : null}
 
         <Button
-          label="Assign report"
+          label={assigning ? 'Assigning...' : 'Assign report'}
           onPress={onAssign}
-          disabled={selectedAssetIds.length === 0 || !selectedUserId}
+          disabled={assigning || selectedAssetIds.length === 0 || !selectedUserId || activeAuditors.length === 0}
         />
       </ScrollView>
       <AdminAppBottomNav />
@@ -332,6 +401,18 @@ export default function AdminAssignReportPage() {
           </View>
         </View>
       </Modal>
+      {showDueDatePicker ? (
+        <DateTimePicker
+          value={selectedDueDate}
+          mode="date"
+          display="default"
+          onChange={(_event, date) => {
+            setShowDueDatePicker(false);
+            if (!date) return;
+            setSelectedDueDate(date);
+          }}
+        />
+      ) : null}
     </ScreenContainer>
   );
 }

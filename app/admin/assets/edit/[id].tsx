@@ -8,6 +8,7 @@ import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import type { Asset } from '@/src/types/models';
 import { fetchAssetById, updateAsset } from '@/src/services/assets';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 
 type DropdownKey = 'status' | 'location' | 'room' | 'category' | 'area' | 'department' | 'criticality';
 
@@ -341,7 +342,7 @@ export default function AdminEditAssetPage() {
         />
         <FormField
           label="Purchase date"
-          value={new Date(asset.purchase_date).toLocaleDateString()}
+          value={formatDateDDMMYYYY(asset.purchase_date)}
           onChangeText={() => {}}
           editable={false}
         />
@@ -359,19 +360,19 @@ export default function AdminEditAssetPage() {
         />
         <FormField
           label="Warranty expiry"
-          value={new Date(asset.warranty_expiry).toLocaleDateString()}
+          value={formatDateDDMMYYYY(asset.warranty_expiry)}
           onChangeText={() => {}}
           editable={false}
         />
         <FormField
           label="Last serviced"
-          value={new Date(asset.last_serviced_date).toLocaleDateString()}
+          value={formatDateDDMMYYYY(asset.last_serviced_date)}
           onChangeText={() => {}}
           editable={false}
         />
         <FormField
           label="Next service"
-          value={new Date(asset.next_service_date).toLocaleDateString()}
+          value={formatDateDDMMYYYY(asset.next_service_date)}
           onChangeText={() => {}}
           editable={false}
         />

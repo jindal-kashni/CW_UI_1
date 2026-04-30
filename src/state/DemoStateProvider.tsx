@@ -12,21 +12,24 @@ type DemoState = {
   completeAlert: (id: string) => void;
   sync: SyncItem[];
   setSync: React.Dispatch<React.SetStateAction<SyncItem[]>>;
+  alertsHydrated: boolean;
 };
 
 const Ctx = createContext<DemoState | null>(null);
 
 export function DemoStateProvider({ children }: { children: React.ReactNode }) {
-  const [assignments, setAssignments] = useState<AuditAssignment[]>(seedAssignments);
-  const [alerts, setAlerts] = useState<AlertItem[]>(seedAlerts);
+  const [assignments, setAssignments] = useState<AuditAssignment[]>([]);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [sync, setSync] = useState<SyncItem[]>(seedSync);
+  const [alertsHydrated, setAlertsHydrated] = useState(false);
 
   React.useEffect(() => {
     let mounted = true;
     (async () => {
       const rows = await fetchAuditorAlerts();
-      if (mounted && rows.length > 0) {
+      if (mounted) {
         setAlerts(rows);
+        setAlertsHydrated(true);
       }
     })();
     return () => {
@@ -58,8 +61,9 @@ export function DemoStateProvider({ children }: { children: React.ReactNode }) {
       completeAlert,
       sync,
       setSync,
+      alertsHydrated,
     }),
-    [assignments, alerts, sync]
+    [assignments, alerts, sync, alertsHydrated]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

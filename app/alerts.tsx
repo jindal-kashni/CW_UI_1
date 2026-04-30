@@ -1,5 +1,4 @@
 import React from 'react';
-import { router } from 'expo-router';
 import { ScrollView, Text, View } from 'react-native';
 import { AlertListItem, EmptyState, FilterChip } from '@/src/components';
 import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
@@ -30,7 +29,7 @@ function AlertsInboxContent() {
 
   return (
     <ScreenContainer>
-      <TopBar title="Alerts Inbox" userName="Auditor" onPressBack={() => router.back()} />
+      <TopBar title="Alerts Inbox" userName="Auditor" />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{

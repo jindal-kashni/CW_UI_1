@@ -8,6 +8,7 @@ import { useTheme } from '@/src/theme';
 import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { getAlertAction, getAlertMeaning } from '@/src/utils/alertMeta';
 import { markAlertRead as markAlertReadRemote } from '@/src/services/systemData';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 
 function AlertDetailContent() {
   const t = useTheme();
@@ -48,7 +49,7 @@ function AlertDetailContent() {
         showsVerticalScrollIndicator={false}>
         <SectionCard
           title={alert.title}
-          subtitle={new Date(alert.createdAt).toLocaleString()}
+          subtitle={formatDateDDMMYYYY(alert.createdAt)}
           right={
             <StatusBadge
               label={alert.severity}

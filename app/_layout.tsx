@@ -72,7 +72,13 @@ function RootLayoutNav() {
             <ThemeProvider value={navigationTheme}>
               <StatusBar style="light" />
               {/* File-based routes are registered automatically; only override screens that need special options. */}
-              <Stack screenOptions={{ headerShown: false }}>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  animation: 'fade_from_bottom',
+                  animationDuration: 140,
+                  gestureEnabled: true,
+                }}>
                 <Stack.Screen name="modal" options={{ presentation: 'modal', headerShown: true }} />
               </Stack>
             </ThemeProvider>

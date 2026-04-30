@@ -3,7 +3,7 @@
     "name": "CWS_UI",
     "slug": "CWS_UI",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "cwsui",
     "userInterfaceStyle": "automatic",
@@ -45,7 +45,8 @@
           "cameraPermission": "This app uses the camera to attach condition photos to audit reports.",
           "photosPermission": "This app accesses your photo library to attach existing photos to audit reports."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

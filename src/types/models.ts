@@ -99,6 +99,8 @@ export type AuditAssignment = {
   title: string;
   dueAt: string; // ISO date
   locationScope: { precincts: string[] };
+  locationId?: ID;
+  roomId?: ID;
   assetId: ID;
   status: AuditStatus;
   progressPct: number; // 0..100

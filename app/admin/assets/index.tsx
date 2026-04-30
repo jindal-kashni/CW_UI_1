@@ -4,12 +4,12 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { ActivityIndicator, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { SearchInput } from '@/src/components';
-import { assets, departmentById, locationById, roomById } from '@/src/data';
 import { AdminScreenScaffold } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { Asset } from '@/src/types/models';
 import { deleteAsset, fetchAssets } from '@/src/services/assets';
+import { resolveDepartmentNames, resolveLocationNames, resolveRoomNames } from '@/src/services/lookups';
 
 type DropdownKey =
   | 'category'
@@ -30,6 +30,9 @@ export default function AdminAssetsPage() {
   const [offset, setOffset] = React.useState(0);
   const [hasMore, setHasMore] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
+  const [departmentNamesById, setDepartmentNamesById] = React.useState<Record<string, string>>({});
+  const [locationNamesById, setLocationNamesById] = React.useState<Record<string, string>>({});
+  const [roomNamesById, setRoomNamesById] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     loadAssets();
@@ -45,6 +48,20 @@ export default function AdminAssetsPage() {
       console.log(error);
     }
   };
+
+  React.useEffect(() => {
+    (async () => {
+      if (assetRows.length === 0) return;
+      const [departmentMap, locationMap, roomMap] = await Promise.all([
+        resolveDepartmentNames(assetRows.map((row) => row.dept_id).filter(Boolean)),
+        resolveLocationNames(assetRows.map((row) => row.location_id).filter(Boolean)),
+        resolveRoomNames(assetRows.map((row) => row.room_id).filter(Boolean)),
+      ]);
+      setDepartmentNamesById(departmentMap);
+      setLocationNamesById(locationMap);
+      setRoomNamesById(roomMap);
+    })();
+  }, [assetRows]);
 
   const loadMoreAssets = async () => {
     if (loadingMore || !hasMore) return;
@@ -93,13 +110,16 @@ export default function AdminAssetsPage() {
   const criticalities = ['Low', 'Medium', 'High', 'Critical'];
   const statuses = ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'];
   const areaOptions = ['Front of house', 'Back of house'];
-  const departments = Array.from(new Set(assetRows.map((a) => departmentById[a.dept_id]?.name ?? 'Unknown')));
-  const locations = Array.from(new Set(assetRows.map((a) => locationById[a.location_id]?.name ?? 'Unknown')));
+  const departmentName = (asset: Asset) => departmentNamesById[asset.dept_id] || 'Unknown';
+  const locationName = (asset: Asset) => locationNamesById[asset.location_id] || 'Unknown';
+  const roomName = (asset: Asset) => roomNamesById[asset.room_id] || 'Unknown';
+  const departments = Array.from(new Set(assetRows.map((a) => departmentName(a))));
+  const locations = Array.from(new Set(assetRows.map((a) => locationName(a))));
   const rooms = Array.from(
     new Set(
       assetRows
-        .filter((a) => !location || (locationById[a.location_id]?.name ?? 'Unknown') === location)
-        .map((a) => roomById[a.room_id]?.name ?? 'Unknown')
+        .filter((a) => !location || locationName(a) === location)
+        .map((a) => roomName(a))
     )
   );
 
@@ -121,19 +141,17 @@ export default function AdminAssetsPage() {
   };
 
   const houseAreaForAsset = (asset: Asset) => {
-    const location = locationById[asset.location_id];
-    const roomName = roomById[asset.room_id]?.name?.toLowerCase() ?? '';
-    const locationName = location?.name?.toLowerCase() ?? '';
-    const precinct = location?.precinct?.toLowerCase() ?? '';
-    const departmentName = departmentById[asset.dept_id]?.name?.toLowerCase() ?? '';
+    const room = roomName(asset).toLowerCase();
+    const locName = locationName(asset).toLowerCase();
+    const deptName = departmentName(asset).toLowerCase();
 
     const isBack =
-      precinct.includes('operations') ||
-      locationName.includes('quarantine') ||
-      locationName.includes('veterinary') ||
-      roomName.includes('back service') ||
-      departmentName.includes('operations') ||
-      departmentName.includes('animal care');
+      locName.includes('operations') ||
+      locName.includes('quarantine') ||
+      locName.includes('veterinary') ||
+      room.includes('back service') ||
+      deptName.includes('operations') ||
+      deptName.includes('animal care');
 
     return isBack ? 'Back of house' : 'Front of house';
   };
@@ -273,26 +291,23 @@ export default function AdminAssetsPage() {
     .filter((a) => (filterMode === 'filters' ? (!area ? true : houseAreaForAsset(a) === area) : true))
     .filter((a) =>
       filterMode === 'filters'
-        ? !department || (departmentById[a.dept_id]?.name ?? 'Unknown') === department
+        ? !department || departmentName(a) === department
         : true
     )
     .filter((a) =>
       filterMode === 'filters'
-        ? !location || (locationById[a.location_id]?.name ?? 'Unknown') === location
+        ? !location || locationName(a) === location
         : true
     )
     .filter((a) =>
-      filterMode === 'filters' ? (!room ? true : (roomById[a.room_id]?.name ?? 'Unknown') === room) : true
+      filterMode === 'filters' ? (!room ? true : roomName(a) === room) : true
     )
     .filter((a) => {
       if (filterMode !== 'search') return true;
       if (!query.trim()) return true;
       const q = query.trim().toLowerCase();
-      const loc = locationById[a.location_id];
-      const dept = departmentById[a.dept_id];
-      const rm = roomById[a.room_id];
       const hay =
-        `${a.name} ${a.asset_code} ${a.category} ${a.sub_category} ${loc?.name ?? ''} ${rm?.name ?? ''} ${dept?.name ?? ''} ${a.condition} ${a.criticality}`.toLowerCase();
+        `${a.name} ${a.asset_code} ${a.category} ${a.sub_category} ${locationName(a)} ${roomName(a)} ${departmentName(a)} ${a.condition} ${a.criticality}`.toLowerCase();
       return hay.includes(q);
     })
     .sort((a, b) => {
@@ -518,11 +533,9 @@ export default function AdminAssetsPage() {
 
         {rows.map((a, idx) => {
           const currentAssignment = assignmentInProgressFor(a.id);
-          const loc = locationById[a.location_id];
-          const rm = roomById[a.room_id];
-          const departmentName = loc?.department_name ?? 'Unknown department';
-          const locationName = loc?.name ?? 'Location unknown';
-          const roomName = rm?.name ?? 'Room not set';
+          const departmentLabel = departmentNamesById[a.dept_id] || 'Unknown department';
+          const locationLabel = locationNamesById[a.location_id] || 'Location unknown';
+          const roomLabel = roomNamesById[a.room_id] || 'Room not set';
           const conditionColors = toneForCell('condition', a.condition);
           const criticalityColors = toneForCell('criticality', a.criticality);
 
@@ -549,9 +562,9 @@ export default function AdminAssetsPage() {
               </View>
 
               <View style={{ flex: 2.2, paddingRight: t.spacing.md }}>
-                <Text style={t.text.caption}>{departmentName}</Text>
+                <Text style={t.text.caption}>{departmentLabel}</Text>
                 <Text style={[t.text.caption, { marginTop: 2 }]}>
-                  {locationName} · {roomName}
+                  {locationLabel} · {roomLabel}
                 </Text>
               </View>
 

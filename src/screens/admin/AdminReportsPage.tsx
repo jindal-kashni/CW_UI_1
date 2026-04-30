@@ -1,17 +1,14 @@
 import React from 'react';
 import { router } from 'expo-router';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { SearchInput } from '@/src/components';
-import {
-  adminDepartmentById,
-  adminLocationById,
-  adminUserById,
-} from '@/src/data/admin';
 import { AdminScreenScaffold } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 import { fetchAdminReports } from '@/src/services/reports';
 import type { AdminReportRecord } from '@/src/data/admin';
+import { resolveDepartmentNames, resolveLocationNames, resolveUserNames } from '@/src/services/lookups';
 
 type ReportView = 'ToDo' | 'InProgress' | 'Completed';
 type FilterKey = 'department' | 'location' | 'user';
@@ -33,18 +30,50 @@ export default function AdminReportsPage() {
   const [notifiedReportIds, setNotifiedReportIds] = React.useState<Record<string, boolean>>({});
   const [pickerField, setPickerField] = React.useState<FilterKey | null>(null);
   const [pickerDraftValue, setPickerDraftValue] = React.useState<string>('All');
+  const [departmentNamesById, setDepartmentNamesById] = React.useState<Record<string, string>>({});
+  const [locationNamesById, setLocationNamesById] = React.useState<Record<string, string>>({});
+  const [userNamesById, setUserNamesById] = React.useState<Record<string, string>>({});
+  const [loadingReports, setLoadingReports] = React.useState(true);
 
   React.useEffect(() => {
     (async () => {
       const data = await fetchAdminReports();
       setReports(data);
+      setLoadingReports(false);
     })();
   }, []);
 
+  React.useEffect(() => {
+    (async () => {
+      if (reports.length === 0) return;
+      const [departmentMap, locationMap, userMap] = await Promise.all([
+        resolveDepartmentNames(reports.map((row) => row.departmentId).filter(Boolean)),
+        resolveLocationNames(reports.map((row) => row.locationId).filter(Boolean)),
+        resolveUserNames(reports.map((row) => row.assignedUserId).filter(Boolean)),
+      ]);
+      setDepartmentNamesById(departmentMap);
+      setLocationNamesById(locationMap);
+      setUserNamesById(userMap);
+    })();
+  }, [reports]);
+
+  const departmentName = React.useCallback(
+    (report: AdminReportRecord) => departmentNamesById[report.departmentId] || 'Unknown',
+    [departmentNamesById]
+  );
+  const locationName = React.useCallback(
+    (report: AdminReportRecord) => locationNamesById[report.locationId] || 'Unknown',
+    [locationNamesById]
+  );
+  const userName = React.useCallback(
+    (report: AdminReportRecord) => userNamesById[report.assignedUserId] || 'Unknown',
+    [userNamesById]
+  );
+
   const options = (values: string[]) => ['All', ...Array.from(new Set(values))];
-  const departmentOptions = options(reports.map((r) => adminDepartmentById[r.departmentId]?.name ?? 'Unknown'));
-  const locationOptions = options(reports.map((r) => adminLocationById[r.locationId]?.name ?? 'Unknown'));
-  const userOptions = options(reports.map((r) => adminUserById[r.assignedUserId]?.name ?? 'Unknown'));
+  const departmentOptions = options(reports.map((r) => departmentName(r)));
+  const locationOptions = options(reports.map((r) => locationName(r)));
+  const userOptions = options(reports.map((r) => userName(r)));
   const pickerConfig = React.useMemo(() => {
     if (pickerField === 'department') return { label: 'Department', options: departmentOptions };
     if (pickerField === 'location') return { label: 'Location', options: locationOptions };
@@ -57,20 +86,14 @@ export default function AdminReportsPage() {
     .filter((r) =>
       department === 'All'
         ? true
-        : (adminDepartmentById[r.departmentId]?.name ?? 'Unknown') === department
+        : departmentName(r) === department
     )
-    .filter((r) =>
-      location === 'All' ? true : (adminLocationById[r.locationId]?.name ?? 'Unknown') === location
-    )
-    .filter((r) =>
-      assignedUser === 'All' ? true : (adminUserById[r.assignedUserId]?.name ?? 'Unknown') === assignedUser
-    )
+    .filter((r) => (location === 'All' ? true : locationName(r) === location))
+    .filter((r) => (assignedUser === 'All' ? true : userName(r) === assignedUser))
     .filter((r) => {
       if (!query.trim()) return true;
       const q = query.toLowerCase();
-      const locationName = adminLocationById[r.locationId]?.name ?? '';
-      const userName = adminUserById[r.assignedUserId]?.name ?? '';
-      return `${r.title} ${locationName} ${userName} ${r.assetCode}`.toLowerCase().includes(q);
+      return `${r.title} ${locationName(r)} ${userName(r)} ${r.assetCode}`.toLowerCase().includes(q);
     });
 
   return (
@@ -174,9 +197,13 @@ export default function AdminReportsPage() {
           <Text style={[t.text.caption, { flex: 1.1, fontWeight: '700' }]}>Due date</Text>
           <Text style={[t.text.caption, { flex: 1.2, fontWeight: '700' }]}>{view === 'ToDo' ? '' : 'Progress'}</Text>
         </View>
-        {filtered.map((report, idx) => {
-          const user = adminUserById[report.assignedUserId];
-          const loc = adminLocationById[report.locationId];
+        {loadingReports ? (
+          <View style={{ paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.md, alignItems: 'center', gap: 8 }}>
+            <ActivityIndicator size="small" color={t.colors.brand.forest} />
+            <Text style={t.text.caption}>Loading reports...</Text>
+          </View>
+        ) : null}
+        {!loadingReports ? filtered.map((report, idx) => {
           const actionLabel =
             report.status === 'Completed'
               ? 'View'
@@ -207,14 +234,14 @@ export default function AdminReportsPage() {
                 <Text style={t.text.caption}>{report.assetCode}</Text>
               </View>
               <Text style={[t.text.caption, { flex: 1.5, paddingRight: t.spacing.md }]} numberOfLines={1}>
-                {loc?.name ?? 'Unknown'}
+                {locationName(report)}
               </Text>
               <Text style={[t.text.caption, { flex: 1.2 }]} numberOfLines={1}>
-                {user?.name ?? 'Unknown'}
+                {userName(report)}
               </Text>
               <Text style={[t.text.caption, { flex: 1 }]}>{displayStatus(report.status as ReportView)}</Text>
               <Text style={[t.text.caption, { flex: 1.1 }]}>
-                {new Date(report.submittedAt ?? report.dueDate).toLocaleDateString()}
+                {formatDateDDMMYYYY(report.submittedAt ?? report.dueDate)}
               </Text>
               <View style={{ flex: 1.2 }}>
                 <Pressable
@@ -241,7 +268,12 @@ export default function AdminReportsPage() {
               </View>
             </Pressable>
           );
-        })}
+        }) : null}
+        {!loadingReports && filtered.length === 0 ? (
+          <View style={{ paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.md }}>
+            <Text style={t.text.caption}>No reports found for the selected filters.</Text>
+          </View>
+        ) : null}
       </View>
       <Modal visible={Boolean(pickerField)} transparent animationType="fade" onRequestClose={() => setPickerField(null)}>
         <View

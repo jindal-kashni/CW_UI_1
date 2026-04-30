@@ -2,29 +2,51 @@ import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Button, StatusBadge } from '@/src/components';
-import {
-  adminDepartmentById,
-  adminLocationById,
-  adminReports,
-  adminRoomById,
-  adminUserById,
-} from '@/src/data/admin';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import { fetchAdminReports } from '@/src/services/reports';
 import type { AdminReportRecord } from '@/src/data/admin';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
+import {
+  resolveDepartmentNames,
+  resolveLocationNames,
+  resolveRoomNames,
+  resolveUserNames,
+} from '@/src/services/lookups';
 
 export default function AdminSubmittedReportDetailPage() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [reports, setReports] = React.useState<AdminReportRecord[]>(adminReports);
+  const [reports, setReports] = React.useState<AdminReportRecord[]>([]);
+  const [loadingReports, setLoadingReports] = React.useState(true);
+  const [departmentNamesById, setDepartmentNamesById] = React.useState<Record<string, string>>({});
+  const [locationNamesById, setLocationNamesById] = React.useState<Record<string, string>>({});
+  const [roomNamesById, setRoomNamesById] = React.useState<Record<string, string>>({});
+  const [userNamesById, setUserNamesById] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     (async () => {
       const rows = await fetchAdminReports();
       setReports(rows);
+      setLoadingReports(false);
     })();
   }, []);
+
+  React.useEffect(() => {
+    (async () => {
+      if (reports.length === 0) return;
+      const [departmentMap, locationMap, roomMap, userMap] = await Promise.all([
+        resolveDepartmentNames(reports.map((row) => row.departmentId).filter(Boolean)),
+        resolveLocationNames(reports.map((row) => row.locationId).filter(Boolean)),
+        resolveRoomNames(reports.map((row) => row.roomId).filter(Boolean)),
+        resolveUserNames(reports.map((row) => row.assignedUserId).filter(Boolean)),
+      ]);
+      setDepartmentNamesById(departmentMap);
+      setLocationNamesById(locationMap);
+      setRoomNamesById(roomMap);
+      setUserNamesById(userMap);
+    })();
+  }, [reports]);
 
   const report = id ? reports.find((item) => item.id === id) : undefined;
   const ordered = [...reports]
@@ -33,6 +55,23 @@ export default function AdminSubmittedReportDetailPage() {
   const idx = ordered.findIndex((r) => r.id === report?.id);
   const previous = idx >= 0 ? ordered[idx + 1] : undefined;
   const next = idx > 0 ? ordered[idx - 1] : undefined;
+
+  if (loadingReports) {
+    return (
+      <ScreenContainer>
+        <TopBar
+          title="Submitted Report"
+          userName="Admin"
+          onPressBack={() => router.replace('/admin/reports/assign' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
+        />
+        <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
+          <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Loading report...</Text>
+        </View>
+        <AdminAppBottomNav />
+      </ScreenContainer>
+    );
+  }
 
   if (!report) {
     return (
@@ -51,10 +90,10 @@ export default function AdminSubmittedReportDetailPage() {
     );
   }
 
-  const location = adminLocationById[report.locationId];
-  const room = adminRoomById[report.roomId];
-  const user = adminUserById[report.assignedUserId];
-  const department = adminDepartmentById[report.departmentId];
+  const locationName = locationNamesById[report.locationId] || 'Unknown';
+  const roomName = roomNamesById[report.roomId] || 'Unknown room';
+  const userName = userNamesById[report.assignedUserId] || 'Unknown user';
+  const departmentName = departmentNamesById[report.departmentId] || 'Department unknown';
 
   const SectionHeading = ({ title }: { title: string }) => (
     <Text style={[t.text.title, { fontSize: 22, lineHeight: 28, marginBottom: t.spacing.md }]}>{title}</Text>
@@ -86,23 +125,22 @@ export default function AdminSubmittedReportDetailPage() {
             <View style={{ flex: 1 }}>
               <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>{report.title}</Text>
               <Text style={[t.text.caption, { marginTop: 4 }]}>
-                {report.assetCode} · {department?.name ?? 'Department unknown'}
+                {report.assetCode || 'No asset code'} · {departmentName}
               </Text>
             </View>
             <StatusBadge label={report.status} tone="good" />
           </View>
           <Text style={t.text.caption}>
-            Submitted by {user?.name ?? 'Unknown user'} on{' '}
-            {new Date(report.submittedAt ?? report.dueDate).toLocaleDateString()}
+            Submitted by {userName} on{' '}
+            {formatDateDDMMYYYY(report.submittedAt ?? report.dueDate)}
           </Text>
         </View>
 
         <SectionDivider />
         <SectionHeading title="Location context" />
         <View style={{ gap: 6 }}>
-          <Text style={t.text.caption}>Location: {location?.name ?? 'Unknown'}</Text>
-          <Text style={t.text.caption}>Room: {room?.roomName ?? 'Unknown room'}</Text>
-          <Text style={t.text.caption}>Site zone: {location?.siteZone ?? 'Unknown zone'}</Text>
+          <Text style={t.text.caption}>Location: {locationName}</Text>
+          <Text style={t.text.caption}>Room: {roomName}</Text>
         </View>
 
         <SectionDivider />

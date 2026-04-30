@@ -43,47 +43,41 @@ export async function createAdminUserAccount(input: {
   password: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const email = input.email.trim().toLowerCase();
-  const displayName = email.split('@')[0] || 'User';
-
   try {
-    const created = await supabase.auth.admin.createUser({
-      email,
-      password: input.password,
-      email_confirm: true,
-      user_metadata: {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    const { data, error } = await supabase.functions.invoke<{
+      success: boolean;
+      error?: string;
+    }>('create-user-account', {
+      body: {
+        email,
         role: input.role,
+        password: input.password,
       },
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     });
 
-    if (created.error || !created.data.user) {
-      const msg = created.error?.message ?? 'Could not create auth user.';
-      if (msg.toLowerCase().includes('not allowed') || msg.toLowerCase().includes('permission')) {
-        return {
-          ok: false,
-          error:
-            'Auth user creation is not permitted with the current key. Use a Supabase service-role endpoint for user creation.',
-        };
+    if (error) {
+      const functionError = error as unknown as { context?: { json?: () => Promise<{ error?: string }> } };
+      if (functionError.context?.json) {
+        try {
+          const payload = await functionError.context.json();
+          if (payload?.error) {
+            return { ok: false, error: payload.error };
+          }
+        } catch {}
       }
-      return { ok: false, error: msg };
+      return {
+        ok: false,
+        error:
+          error.message ||
+          'Could not reach user creation service. Deploy the `create-user-account` edge function first.',
+      };
     }
 
-    const userId = created.data.user.id;
-    const now = new Date().toISOString();
-    const { error: profileError } = await supabase.from('user_profile').upsert(
-      [
-        {
-          user_id: userId,
-          name: displayName,
-          email,
-          role: input.role,
-          updated_at: now,
-        },
-      ],
-      { onConflict: 'user_id' }
-    );
-
-    if (profileError) {
-      return { ok: false, error: profileError.message };
+    if (!data?.success) {
+      return { ok: false, error: data?.error ?? 'User creation failed.' };
     }
 
     return { ok: true };
@@ -91,6 +85,100 @@ export async function createAdminUserAccount(input: {
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Unexpected error while creating user.',
+    };
+  }
+}
+
+export async function deleteAdminUserAccount(input: {
+  userId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    const { data, error } = await supabase.functions.invoke<{
+      success: boolean;
+      error?: string;
+    }>('delete-user-account', {
+      body: {
+        userId: input.userId,
+      },
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    });
+
+    if (error) {
+      const functionError = error as unknown as { context?: { json?: () => Promise<{ error?: string }> } };
+      if (functionError.context?.json) {
+        try {
+          const payload = await functionError.context.json();
+          if (payload?.error) {
+            return { ok: false, error: payload.error };
+          }
+        } catch {}
+      }
+      return {
+        ok: false,
+        error:
+          error.message ||
+          'Could not reach user deletion service. Deploy the `delete-user-account` edge function first.',
+      };
+    }
+
+    if (!data?.success) {
+      return { ok: false, error: data?.error ?? 'User deletion failed.' };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unexpected error while deleting user.',
+    };
+  }
+}
+
+export async function updateAdminUserRole(input: {
+  userId: string;
+  role: AdminRole;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    const { data, error } = await supabase.functions.invoke<{
+      success: boolean;
+      error?: string;
+    }>('admin-update-user', {
+      body: {
+        userId: input.userId,
+        role: input.role,
+      },
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    });
+
+    if (error) {
+      const functionError = error as unknown as { context?: { json?: () => Promise<{ error?: string }> } };
+      if (functionError.context?.json) {
+        try {
+          const payload = await functionError.context.json();
+          if (payload?.error) return { ok: false, error: payload.error };
+        } catch {}
+      }
+      return {
+        ok: false,
+        error:
+          error.message ||
+          'Could not reach user update service. Deploy the `admin-update-user` edge function first.',
+      };
+    }
+
+    if (!data?.success) {
+      return { ok: false, error: data?.error ?? 'User update failed.' };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unexpected error while updating user.',
     };
   }
 }

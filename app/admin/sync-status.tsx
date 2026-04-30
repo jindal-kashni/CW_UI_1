@@ -1,16 +1,19 @@
 import React from 'react';
-import { Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { Button } from '@/src/components';
-import { adminSyncItems, adminUserById } from '@/src/data/admin';
 import { AdminScreenScaffold } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import { fetchAdminSyncItems } from '@/src/services/systemData';
 import type { AdminSyncRecord } from '@/src/data/admin';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
+import { resolveUserNames } from '@/src/services/lookups';
 
 export default function AdminSyncStatusPage() {
   const t = useTheme();
-  const [items, setItems] = React.useState<AdminSyncRecord[]>(adminSyncItems);
+  const [items, setItems] = React.useState<AdminSyncRecord[]>([]);
+  const [loadingSyncItems, setLoadingSyncItems] = React.useState(true);
   const [message, setMessage] = React.useState<string | null>(null);
+  const [userNameById, setUserNameById] = React.useState<Record<string, string>>({});
   const pending = items.filter((item) => item.state === 'Pending').length;
   const failed = items.filter((item) => item.state === 'Failed').length;
   const healthy = items.filter((item) => item.state === 'UpToDate').length;
@@ -19,8 +22,18 @@ export default function AdminSyncStatusPage() {
     (async () => {
       const rows = await fetchAdminSyncItems();
       setItems(rows);
+      setLoadingSyncItems(false);
     })();
   }, []);
+
+  React.useEffect(() => {
+    (async () => {
+      const userIds = Array.from(new Set(items.map((item) => item.userId).filter(Boolean)));
+      if (userIds.length === 0) return;
+      const names = await resolveUserNames(userIds);
+      setUserNameById(names);
+    })();
+  }, [items]);
 
   return (
     <AdminScreenScaffold title="Sync Status">
@@ -39,51 +52,61 @@ export default function AdminSyncStatusPage() {
       </View>
       <View style={{ height: t.spacing.lg }} />
       <View style={{ gap: t.spacing.md }}>
-        {items.map((item) => (
-          <View
-            key={item.id}
-            style={{
-              borderWidth: 1,
-              borderColor: t.colors.border.subtle,
-              borderRadius: t.radius.lg,
-              backgroundColor: t.colors.card.surface,
-              paddingHorizontal: t.spacing.md,
-              paddingVertical: t.spacing.md,
-              gap: 4,
-            }}>
-            <Text style={[t.text.body, { fontWeight: '700' }]}>{item.deviceLabel}</Text>
-            <Text style={t.text.caption}>
-              User: {adminUserById[item.userId]?.name ?? 'Unknown'} · {item.state}
-            </Text>
-            <Text style={t.text.caption}>{item.detail}</Text>
-            <Text style={t.text.caption}>Updated: {new Date(item.updatedAt).toLocaleString()}</Text>
-            <View style={{ flexDirection: 'row', gap: t.spacing.md, marginTop: 2 }}>
-              <Button
-                label="Retry"
-                variant="secondary"
-                onPress={() => {
-                  setItems((prev) =>
-                    prev.map((entry) =>
-                      entry.id === item.id
-                        ? { ...entry, state: 'UpToDate', updatedAt: new Date().toISOString(), detail: 'Retry succeeded.' }
-                        : entry
-                    )
-                  );
-                  setMessage(`Retry completed for ${item.deviceLabel}.`);
-                }}
-                style={{ flex: 1 }}
-              />
-              <Button
-                label="Review log"
-                variant="secondary"
-                onPress={() => {
-                  setMessage(`Log: ${item.detail}`);
-                }}
-                style={{ flex: 1 }}
-              />
-            </View>
+        {loadingSyncItems ? (
+          <View style={{ minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <ActivityIndicator size="small" color={t.colors.brand.forest} />
+            <Text style={t.text.caption}>Loading sync records...</Text>
           </View>
-        ))}
+        ) : null}
+        {!loadingSyncItems && items.length === 0 ? (
+          <Text style={t.text.caption}>No sync records found yet.</Text>
+        ) : !loadingSyncItems ? (
+          items.map((item) => (
+            <View
+              key={item.id}
+              style={{
+                borderWidth: 1,
+                borderColor: t.colors.border.subtle,
+                borderRadius: t.radius.lg,
+                backgroundColor: t.colors.card.surface,
+                paddingHorizontal: t.spacing.md,
+                paddingVertical: t.spacing.md,
+                gap: 4,
+              }}>
+              <Text style={[t.text.body, { fontWeight: '700' }]}>{item.deviceLabel}</Text>
+              <Text style={t.text.caption}>
+                User: {userNameById[item.userId] ?? item.userId ?? 'Unknown'} · {item.state}
+              </Text>
+              <Text style={t.text.caption}>{item.detail}</Text>
+              <Text style={t.text.caption}>Updated: {formatDateDDMMYYYY(item.updatedAt)}</Text>
+              <View style={{ flexDirection: 'row', gap: t.spacing.md, marginTop: 2 }}>
+                <Button
+                  label="Retry"
+                  variant="secondary"
+                  onPress={() => {
+                    setItems((prev) =>
+                      prev.map((entry) =>
+                        entry.id === item.id
+                          ? { ...entry, state: 'UpToDate', updatedAt: new Date().toISOString(), detail: 'Retry succeeded.' }
+                          : entry
+                      )
+                    );
+                    setMessage(`Retry completed for ${item.deviceLabel}.`);
+                  }}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  label="Review log"
+                  variant="secondary"
+                  onPress={() => {
+                    setMessage(`Log: ${item.detail}`);
+                  }}
+                  style={{ flex: 1 }}
+                />
+              </View>
+            </View>
+          ))
+        ) : null}
       </View>
       {message ? <Text style={[t.text.caption, { color: '#2F5B45', marginTop: t.spacing.md }]}>{message}</Text> : null}
     </AdminScreenScaffold>

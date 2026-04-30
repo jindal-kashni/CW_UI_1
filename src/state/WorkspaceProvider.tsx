@@ -2,6 +2,13 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import type { Session, User } from '@supabase/supabase-js';
 import { loadSessionAndRole, resolveRoleForUser, type WorkspaceRole } from '@/src/services/auth';
 import { supabase } from '@/utils/supabase';
+import { clearSessionCache } from '@/src/state/sessionCache';
+import {
+  defaultAuditorSettings,
+  fetchAuditorSettings,
+  saveAuditorSettings,
+  type AuditorSettings,
+} from '@/src/services/settings';
 export type { WorkspaceRole } from '@/src/services/auth';
 
 type Ctx = {
@@ -13,6 +20,12 @@ type Ctx = {
   logout: () => Promise<void>;
   signOutMessage: string | null;
   clearSignOutMessage: () => void;
+  auditorSettings: AuditorSettings;
+  auditorSettingsReady: boolean;
+  refreshAuditorSettings: () => Promise<void>;
+  persistAuditorSettings: (
+    next: AuditorSettings
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
 };
 
 const WorkspaceContext = createContext<Ctx | null>(null);
@@ -23,6 +36,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRoleState] = useState<WorkspaceRole | null>(null);
   const [signOutMessage, setSignOutMessage] = useState<string | null>(null);
+  const [auditorSettings, setAuditorSettings] = useState<AuditorSettings>(defaultAuditorSettings);
+  const [auditorSettingsReady, setAuditorSettingsReady] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -74,8 +89,42 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
 
     setRoleState(null);
+    clearSessionCache();
+    setAuditorSettings(defaultAuditorSettings);
+    setAuditorSettingsReady(false);
     setSignOutMessage('Successfully logged out');
   }, []);
+
+  const refreshAuditorSettings = useCallback(async () => {
+    if (!user?.id || role !== 'auditor') {
+      setAuditorSettings(defaultAuditorSettings);
+      setAuditorSettingsReady(true);
+      return;
+    }
+    const settings = await fetchAuditorSettings(user.id);
+    setAuditorSettings(settings);
+    setAuditorSettingsReady(true);
+  }, [role, user?.id]);
+
+  const persistAuditorSettings = useCallback(
+    async (next: AuditorSettings) => {
+      setAuditorSettings(next);
+      if (!user?.id || role !== 'auditor') {
+        return { ok: false as const, error: 'Please sign in again.' };
+      }
+      const result = await saveAuditorSettings(user.id, next);
+      return result;
+    },
+    [role, user?.id]
+  );
+
+  useEffect(() => {
+    setAuditorSettingsReady(false);
+    refreshAuditorSettings().catch(() => {
+      setAuditorSettings(defaultAuditorSettings);
+      setAuditorSettingsReady(true);
+    });
+  }, [refreshAuditorSettings]);
 
   const value = useMemo(
     () => ({
@@ -87,8 +136,25 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       logout,
       signOutMessage,
       clearSignOutMessage,
+      auditorSettings,
+      auditorSettingsReady,
+      refreshAuditorSettings,
+      persistAuditorSettings,
     }),
-    [initializing, session, user, role, setRole, logout, signOutMessage, clearSignOutMessage]
+    [
+      initializing,
+      session,
+      user,
+      role,
+      setRole,
+      logout,
+      signOutMessage,
+      clearSignOutMessage,
+      auditorSettings,
+      auditorSettingsReady,
+      refreshAuditorSettings,
+      persistAuditorSettings,
+    ]
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

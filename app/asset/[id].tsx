@@ -2,12 +2,13 @@ import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ScrollView, Text, View } from 'react-native';
 import { Button, StatusBadge } from '@/src/components';
-import { departmentById, locationById, roomById } from '@/src/data';
 import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 import { fetchAssetById } from '@/src/services/assets';
 import { saveAuditDraft } from '@/src/services/reports';
+import { resolveDepartmentNames, resolveLocationNames, resolveRoomNames } from '@/src/services/lookups';
 import type { Asset } from '@/src/types/models';
 
 function AssetDetailContent() {
@@ -16,6 +17,9 @@ function AssetDetailContent() {
   const [asset, setAsset] = React.useState<Asset | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [locationName, setLocationName] = React.useState('');
+  const [roomName, setRoomName] = React.useState('');
+  const [departmentName, setDepartmentName] = React.useState('');
 
   React.useEffect(() => {
     let mounted = true;
@@ -44,6 +48,25 @@ function AssetDetailContent() {
     };
   }, [id]);
 
+  React.useEffect(() => {
+    let mounted = true;
+    if (!asset) return;
+    (async () => {
+      const [loc, room, dept] = await Promise.all([
+        resolveLocationNames(asset.location_id ? [asset.location_id] : []),
+        resolveRoomNames(asset.room_id ? [asset.room_id] : []),
+        resolveDepartmentNames(asset.dept_id ? [asset.dept_id] : []),
+      ]);
+      if (!mounted) return;
+      setLocationName(loc[asset.location_id] ?? '');
+      setRoomName(room[asset.room_id] ?? '');
+      setDepartmentName(dept[asset.dept_id] ?? '');
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [asset]);
+
   if (loading) {
     return (
       <ScreenContainer>
@@ -69,9 +92,9 @@ function AssetDetailContent() {
     );
   }
 
-  const location = locationById[asset.location_id];
-  const room = roomById[asset.room_id];
-  const department = departmentById[asset.dept_id];
+  const location = locationName || 'Unknown location';
+  const room = roomName || 'Unknown room';
+  const department = departmentName || 'Unknown department';
   const fmtCurrency = (n: number) =>
     new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(n);
   const statusLabel = asset.status;
@@ -135,9 +158,9 @@ function AssetDetailContent() {
         <SectionDivider />
         <SectionHeading title="Location and ownership" />
         <View style={{ gap: t.spacing.md }}>
-          <FieldRow label="Location" value={location?.name ?? 'Unknown location'} />
-          <FieldRow label="Room" value={room?.name ?? 'Unknown room'} />
-          <FieldRow label="Department" value={department?.name ?? 'Unknown department'} />
+          <FieldRow label="Location" value={location} />
+          <FieldRow label="Room" value={room} />
+          <FieldRow label="Department" value={department} />
           <FieldRow label="Assigned to" value={asset.assigned_to} />
         </View>
 
@@ -169,17 +192,17 @@ function AssetDetailContent() {
         <SectionDivider />
         <SectionHeading title="Lifecycle and costs" />
         <View style={{ gap: t.spacing.md }}>
-          <FieldRow label="Purchase date" value={new Date(asset.purchase_date).toLocaleDateString()} />
+          <FieldRow label="Purchase date" value={formatDateDDMMYYYY(asset.purchase_date)} />
           <FieldRow label="Purchase cost" value={fmtCurrency(asset.purchase_cost)} />
           <FieldRow label="Replacement cost" value={fmtCurrency(asset.replacement_cost)} />
-          <FieldRow label="Warranty expiry" value={new Date(asset.warranty_expiry).toLocaleDateString()} />
+          <FieldRow label="Warranty expiry" value={formatDateDDMMYYYY(asset.warranty_expiry)} />
         </View>
 
         <SectionDivider />
         <SectionHeading title="Service history" />
         <View style={{ gap: t.spacing.md }}>
-          <FieldRow label="Last serviced" value={new Date(asset.last_serviced_date).toLocaleDateString()} />
-          <FieldRow label="Next service" value={new Date(asset.next_service_date).toLocaleDateString()} />
+          <FieldRow label="Last serviced" value={formatDateDDMMYYYY(asset.last_serviced_date)} />
+          <FieldRow label="Next service" value={formatDateDDMMYYYY(asset.next_service_date)} />
         </View>
 
         <SectionDivider />

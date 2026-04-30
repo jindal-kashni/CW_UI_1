@@ -25,7 +25,7 @@ function isLoggedOutAllowed(pathname: string, segments: readonly string[]) {
  * Sends everything else to `/` so role-gated layouts never sit on-screen with nothing rendered.
  */
 export function AuthRedirect() {
-  const { role, initializing } = useWorkspace();
+  const { role, user, initializing } = useWorkspace();
   const pathname = usePathname() ?? '/';
   const segmentsRaw = useSegments();
   // Avoid `?? []` (new array each render when undefined) — it would churn effect deps.
@@ -56,6 +56,11 @@ export function AuthRedirect() {
     if (initializing) return;
     if (!navState?.key) return;
     if (!navigationRef.isReady()) return;
+    const mustResetPassword = Boolean(user?.user_metadata?.must_reset_password);
+    if (role !== null && mustResetPassword && pathname !== '/update-password') {
+      router.replace('/update-password?first=1' as any);
+      return;
+    }
     if (role === 'admin' && segmentList[0] === 'audit') {
       router.replace('/admin' as any);
       return;
@@ -63,7 +68,7 @@ export function AuthRedirect() {
     if (role === 'auditor' && segmentList[0] === 'admin') {
       router.replace('/audit/history' as any);
     }
-  }, [initializing, role, segmentList, navState?.key, navigationRef]);
+  }, [initializing, role, user, pathname, segmentList, navState?.key, navigationRef]);
 
   return null;
 }

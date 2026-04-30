@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useTheme } from '@/src/theme';
 import type { AuditAssignment } from '@/src/types/models';
+import { formatDateDDMMYYYY } from '@/src/utils/date';
 import { Card } from './Card';
 import { ProgressBar } from './ProgressBar';
 import { StatusBadge } from './StatusBadge';
@@ -48,7 +49,7 @@ export function AuditAssignmentCard({
           <View style={{ flex: 1 }}>
             <Text style={[t.text.title, { fontSize: 18, lineHeight: 24 }]}>{item.title}</Text>
             <Text style={[t.text.caption, { marginTop: t.spacing.xs }]}>
-              Due {new Date(item.dueAt).toLocaleDateString()}
+              Due {formatDateDDMMYYYY(item.dueAt)}
             </Text>
             <View style={{ height: t.spacing.md }} />
             <Text style={t.text.bodyMuted}>{item.summary}</Text>

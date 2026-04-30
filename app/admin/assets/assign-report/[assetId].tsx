@@ -2,12 +2,14 @@ import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Button } from '@/src/components';
-import { assetById, locationById } from '@/src/data';
-import { adminDepartmentById, adminUsers } from '@/src/data/admin';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { AuditAssignment, Assessor } from '@/src/types/models';
+import { fetchAssetById } from '@/src/services/assets';
+import { fetchAdminUsers } from '@/src/services/users';
+import { resolveDepartmentNames, resolveLocationNames } from '@/src/services/lookups';
+import type { AdminUserRecord } from '@/src/data/admin';
 
 function toAssessor(user: { id: string; name: string }): Assessor {
   return {
@@ -22,14 +24,51 @@ export default function AdminAssignConditionReportPage() {
   const t = useTheme();
   const { setAssignments } = useDemoState();
   const { assetId } = useLocalSearchParams<{ assetId: string }>();
-  const asset = assetId ? assetById[assetId] : undefined;
-  const location = asset ? locationById[asset.location_id] : undefined;
+  const [asset, setAsset] = React.useState<any | null>(null);
+  const [loadingAsset, setLoadingAsset] = React.useState(true);
+  const [locationNameById, setLocationNameById] = React.useState<Record<string, string>>({});
+  const [departmentNameById, setDepartmentNameById] = React.useState<Record<string, string>>({});
+  const [auditors, setAuditors] = React.useState<AdminUserRecord[]>([]);
 
-  const auditors = React.useMemo(
-    () => adminUsers.filter((u) => u.role === 'Auditor' && u.status === 'Active'),
-    []
-  );
-  const [selectedId, setSelectedId] = React.useState<string | null>(auditors[0]?.id ?? null);
+  React.useEffect(() => {
+    (async () => {
+      const [users, assetRow] = await Promise.all([
+        fetchAdminUsers(),
+        assetId ? fetchAssetById(assetId) : Promise.resolve(null),
+      ]);
+      const activeAuditors = users.filter((u) => u.role === 'Auditor' && u.status === 'Active');
+      setAuditors(activeAuditors);
+      setSelectedId(activeAuditors[0]?.id ?? null);
+      setAsset(assetRow);
+      if (assetRow?.location_id) {
+        setLocationNameById(await resolveLocationNames([assetRow.location_id]));
+      }
+      const deptIds = activeAuditors.map((row) => row.departmentId).filter(Boolean);
+      if (deptIds.length) {
+        setDepartmentNameById(await resolveDepartmentNames(deptIds));
+      }
+      setLoadingAsset(false);
+    })();
+  }, [assetId]);
+
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+
+  if (loadingAsset) {
+    return (
+      <ScreenContainer>
+        <TopBar
+          title="Assign report"
+          userName="Admin"
+          onPressBack={() => router.replace('/admin/assets' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
+        />
+        <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
+          <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Loading asset...</Text>
+        </View>
+        <AdminAppBottomNav />
+      </ScreenContainer>
+    );
+  }
 
   if (!asset) {
     return (
@@ -60,7 +99,7 @@ export default function AdminAssignConditionReportPage() {
       id: `aud-assign-${Date.now()}`,
       title: `Condition Report Task · ${asset.asset_code}`,
       dueAt,
-      locationScope: { precincts: [location?.precinct ?? 'Central Precinct'] },
+      locationScope: { precincts: [locationNameById[asset.location_id] ?? 'Location'] },
       assetId: asset.id,
       status: 'Assigned',
       progressPct: 0,
@@ -112,7 +151,7 @@ export default function AdminAssignConditionReportPage() {
           }}>
           <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{asset.name}</Text>
           <Text style={t.text.caption}>
-            {asset.asset_code} · {location?.name ?? 'Unknown location'}
+            {asset.asset_code} · {locationNameById[asset.location_id] ?? 'Unknown location'}
           </Text>
         </View>
 
@@ -123,7 +162,7 @@ export default function AdminAssignConditionReportPage() {
           <View style={{ gap: t.spacing.sm }}>
             {auditors.map((u) => {
               const selected = selectedId === u.id;
-              const dept = adminDepartmentById[u.departmentId]?.name ?? '';
+              const dept = departmentNameById[u.departmentId] ?? '';
               return (
                 <Pressable
                   key={u.id}

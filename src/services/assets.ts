@@ -64,6 +64,18 @@ type AssetRow = {
   updated_at: string;
 };
 
+type AssetListRow = {
+  asset_id: string;
+  asset_code: string;
+  name: string;
+  category: string;
+  criticality: string | null;
+  status: string;
+  location_id: string | null;
+  room_id: string | null;
+  dept_id: string | null;
+};
+
 const ALLOWED_CONDITIONS: AssetCondition[] = [
   'Excellent',
   'Good',
@@ -131,6 +143,40 @@ function mapAssetRow(row: AssetRow): Asset {
     notes: asString(row.notes),
     created_at: row.created_at,
     updated_at: row.updated_at,
+    locationId: asString(row.location_id),
+  };
+}
+
+function mapAssetListRow(row: AssetListRow): Asset {
+  return {
+    id: row.asset_id,
+    asset_code: row.asset_code,
+    name: row.name,
+    category: row.category,
+    sub_category: '',
+    description: '',
+    make_model: '',
+    serial_number: '',
+    status: safeStatus(row.status),
+    location_id: asString(row.location_id),
+    room_id: asString(row.room_id),
+    dept_id: asString(row.dept_id),
+    assigned_to: '',
+    condition: 'Good',
+    criticality: safeCriticality(row.criticality),
+    remaining_life_years: 0,
+    utilisation: 'Moderate',
+    compatibility_of_use: 'FullyCompatible',
+    environmental_impact: 'Low',
+    purchase_date: '',
+    purchase_cost: 0,
+    replacement_cost: 0,
+    warranty_expiry: '',
+    last_serviced_date: '',
+    next_service_date: '',
+    notes: '',
+    created_at: '',
+    updated_at: '',
     locationId: asString(row.location_id),
   };
 }
@@ -206,6 +252,33 @@ export async function fetchAssets(params?: {
     .range(offset, to);
   if (error) throw error;
   return (data as unknown as AssetRow[]).map(mapAssetRow);
+}
+
+export async function fetchAssetsForList(params?: {
+  offset?: number;
+  limit?: number;
+}): Promise<Asset[]> {
+  const offset = Math.max(0, params?.offset ?? 0);
+  const limit = Math.max(1, params?.limit ?? 50);
+  const to = offset + limit - 1;
+  const LIST_COLUMNS = [
+    'asset_id',
+    'asset_code',
+    'name',
+    'category',
+    'criticality',
+    'status',
+    'location_id',
+    'room_id',
+    'dept_id',
+  ].join(',');
+  const { data, error } = await supabase
+    .from('asset')
+    .select(LIST_COLUMNS)
+    .order('name', { ascending: true })
+    .range(offset, to);
+  if (error) throw error;
+  return (data as unknown as AssetListRow[]).map(mapAssetListRow);
 }
 
 export async function fetchAssetById(id: string): Promise<Asset | null> {

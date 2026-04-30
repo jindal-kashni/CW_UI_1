@@ -84,6 +84,16 @@ export default function AdminCreateAssetPage() {
   ];
   const canSaveAsset = requiredValues.every((value) => value.trim().length > 0);
 
+  const toIsoDate = (value: string): string => {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const parts = trimmed.split('/');
+    if (parts.length !== 3) return trimmed;
+    const [day, month, year] = parts;
+    if (day.length !== 2 || month.length !== 2 || year.length !== 4) return trimmed;
+    return `${year}-${month}-${day}`;
+  };
+
   const handleSaveAsset = async () => {
     if (!canSaveAsset) return;
 
@@ -102,10 +112,10 @@ export default function AdminCreateAssetPage() {
         status: status,
         purchase_cost: Number(purchaseCost),
         replacement_cost: Number(replacementCost),
-        purchase_date: purchaseDate,
-        warranty_expiry: warrantyExpiry,
+        purchase_date: toIsoDate(purchaseDate),
+        warranty_expiry: toIsoDate(warrantyExpiry),
         assigned_to: assignedTo,
-        last_serviced_date: lastService,
+        last_serviced_date: toIsoDate(lastService),
         remaining_life_years: Number(remainingLife),
         compatibility_of_use: compatibilityOfUse,
         environmental_impact: environmentalImpact,
@@ -114,7 +124,7 @@ export default function AdminCreateAssetPage() {
         location_id: location,
         room_id: room,
         utilisation,
-        next_service_date: lastService,
+        next_service_date: toIsoDate(lastService),
       });
     } catch (error) {
       console.log(error);
@@ -210,12 +220,12 @@ export default function AdminCreateAssetPage() {
             <View style={{ flex: 1 }}><FormField label="Replacement cost" value={replacementCost} onChangeText={setReplacementCost} /></View>
           </View>
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-            <View style={{ flex: 1 }}><FormField label="Purchase date (YYYY-MM-DD)" value={purchaseDate} onChangeText={setPurchaseDate} /></View>
+            <View style={{ flex: 1 }}><FormField label="Purchase date (DD/MM/YYYY)" value={purchaseDate} onChangeText={setPurchaseDate} /></View>
             <View style={{ flex: 1 }}><FormField label="Remaining life (years)" value={remainingLife} onChangeText={setRemainingLife} /></View>
           </View>
-          <FormField label="Warranty expiry (YYYY-MM-DD)" value={warrantyExpiry} onChangeText={setWarrantyExpiry} />
+          <FormField label="Warranty expiry (DD/MM/YYYY)" value={warrantyExpiry} onChangeText={setWarrantyExpiry} />
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-            <View style={{ flex: 1 }}><FormField label="Last serviced date" value={lastService} onChangeText={setLastService} /></View>
+            <View style={{ flex: 1 }}><FormField label="Last serviced date (DD/MM/YYYY)" value={lastService} onChangeText={setLastService} /></View>
             <View style={{ flex: 1 }}>
               <Text style={[t.text.caption, { fontWeight: '700', marginBottom: t.spacing.xs }]}>Service frequency</Text>
               <Pressable

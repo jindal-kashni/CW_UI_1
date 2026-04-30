@@ -58,14 +58,46 @@ type AuditAssignmentRow = {
   updated_at: string;
 };
 
-function logRowToAdminReport(row: AuditLogRow): AdminReportRecord {
+type AssetLookupRow = {
+  asset_id: string;
+  asset_code: string | null;
+  name: string | null;
+  location_id: string | null;
+  room_id: string | null;
+  dept_id: string | null;
+};
+
+type AssetLookup = {
+  code: string;
+  name: string;
+  locationId: string;
+  roomId: string;
+  departmentId: string;
+};
+
+function toAssetLookupMap(rows: AssetLookupRow[]): Record<string, AssetLookup> {
+  return Object.fromEntries(
+    rows.map((row) => [
+      row.asset_id,
+      {
+        code: asString(row.asset_code),
+        name: asString(row.name),
+        locationId: asString(row.location_id),
+        roomId: asString(row.room_id),
+        departmentId: asString(row.dept_id),
+      },
+    ])
+  );
+}
+
+function logRowToAdminReport(row: AuditLogRow, asset: AssetLookup | undefined): AdminReportRecord {
   return {
     id: row.audit_id,
-    title: `Condition Report · ${asString(row.inspector_name) || 'Auditor'}`,
-    assetCode: '',
-    locationId: asString(row.location_id),
-    roomId: asString(row.room_id),
-    departmentId: '',
+    title: asset?.name ? `Condition Report · ${asset.name}` : `Condition Report · ${asString(row.inspector_name) || 'Auditor'}`,
+    assetCode: asset?.code ?? '',
+    locationId: asset?.locationId || asString(row.location_id),
+    roomId: asset?.roomId || asString(row.room_id),
+    departmentId: asset?.departmentId ?? '',
     assignedUserId: '',
     status: 'Completed',
     dueDate: dateOnly(row.audit_date) || dateOnly(row.created_at),
@@ -77,7 +109,7 @@ function logRowToAdminReport(row: AuditLogRow): AdminReportRecord {
   };
 }
 
-function assignmentRowToAdminReport(row: AuditAssignmentRow): AdminReportRecord {
+function assignmentRowToAdminReport(row: AuditAssignmentRow, asset: AssetLookup | undefined): AdminReportRecord {
   const status = safeAssignmentStatus(row.status);
   const adminStatus =
     status === 'Completed' || status === 'Submitted'
@@ -87,11 +119,11 @@ function assignmentRowToAdminReport(row: AuditAssignmentRow): AdminReportRecord 
         : 'ToDo';
   return {
     id: row.assignment_id,
-    title: row.title,
-    assetCode: '',
-    locationId: asString(row.location_id),
-    roomId: asString(row.room_id),
-    departmentId: '',
+    title: row.title || (asset?.name ? `Condition Report Task · ${asset.name}` : 'Condition Report Task'),
+    assetCode: asset?.code ?? '',
+    locationId: asset?.locationId || asString(row.location_id),
+    roomId: asset?.roomId || asString(row.room_id),
+    departmentId: asset?.departmentId ?? '',
     assignedUserId: asString(row.assigned_user_id),
     status: adminStatus,
     dueDate: dateOnly(row.due_at),
@@ -108,6 +140,8 @@ function assignmentRowToAuditAssignment(row: AuditAssignmentRow): AuditAssignmen
     title: row.title,
     dueAt: row.due_at ?? '',
     locationScope: { precincts: row.precincts ?? [] },
+    locationId: asString(row.location_id) || undefined,
+    roomId: asString(row.room_id) || undefined,
     assetId: asString(row.asset_id),
     status: safeAssignmentStatus(row.status),
     progressPct: asNumber(row.progress_pct),
@@ -135,17 +169,38 @@ export async function fetchAdminReports(): Promise<AdminReportRecord[]> {
       .limit(100),
   ]);
 
+  const assetIds = [
+    ...new Set(
+      [
+        ...((logs.data as AuditLogRow[] | null)?.map((row) => asString(row.asset_id)).filter(Boolean) ?? []),
+        ...((assignments.data as AuditAssignmentRow[] | null)
+          ?.map((row) => asString(row.asset_id))
+          .filter(Boolean) ?? []),
+      ].filter(Boolean)
+    ),
+  ];
+  let resolvedAssetLookup: Record<string, AssetLookup> = {};
+  if (assetIds.length > 0) {
+    const { data: assetsData } = await supabase
+      .from('asset')
+      .select('asset_id, asset_code, name, location_id, room_id, dept_id')
+      .in('asset_id', assetIds);
+    resolvedAssetLookup = toAssetLookupMap((assetsData as AssetLookupRow[] | null) ?? []);
+  }
+
   const rows: AdminReportRecord[] = [];
   if (!assignments.error && assignments.data) {
     for (const row of assignments.data as unknown as AuditAssignmentRow[]) {
       if (row.status !== 'Completed') {
-        rows.push(assignmentRowToAdminReport(row));
+        const asset = resolvedAssetLookup[asString(row.asset_id)];
+        rows.push(assignmentRowToAdminReport(row, asset));
       }
     }
   }
   if (!logs.error && logs.data) {
     for (const row of logs.data as unknown as AuditLogRow[]) {
-      rows.push(logRowToAdminReport(row));
+      const asset = resolvedAssetLookup[asString(row.asset_id)];
+      rows.push(logRowToAdminReport(row, asset));
     }
   }
   return rows;
@@ -156,7 +211,10 @@ export async function fetchAuditAssignments(): Promise<AuditAssignment[]> {
     .from('audit_assignment')
     .select('assignment_id, title, asset_id, location_id, room_id, due_at, status, progress_pct, assigned_user_id, created_by, summary, precincts, created_at, updated_at')
     .order('due_at', { ascending: true });
-  if (error || !data) return [];
+  if (error || !data) {
+    if (error) console.log('fetchAuditAssignments error:', error.message);
+    return [];
+  }
   return (data as unknown as AuditAssignmentRow[]).map(assignmentRowToAuditAssignment);
 }
 
@@ -265,5 +323,105 @@ export async function saveAuditDraft(params: {
     return false;
   } catch {
     return false;
+  }
+}
+
+type AssetAssignmentSeedRow = {
+  asset_id: string;
+  asset_code: string | null;
+  name: string | null;
+  location_id: string | null;
+  room_id: string | null;
+};
+
+export async function createAuditAssignmentsBulk(params: {
+  assignedUserId: string;
+  assetIds: string[];
+  dueAt?: string;
+}): Promise<{ ok: boolean; created?: AuditAssignment[]; error?: string }> {
+  const ids = Array.from(new Set(params.assetIds.filter(Boolean)));
+  if (!params.assignedUserId || ids.length === 0) {
+    return { ok: false, error: 'Select at least one asset and an assignee.' };
+  }
+
+  try {
+    const { data: assignee, error: assigneeError } = await supabase
+      .from('user_profile')
+      .select('user_id, role')
+      .eq('user_id', params.assignedUserId)
+      .maybeSingle();
+    if (assigneeError || !assignee) {
+      return { ok: false, error: assigneeError?.message ?? 'Assignee not found.' };
+    }
+    if (asString((assignee as Record<string, unknown>).role) !== 'Auditor') {
+      return { ok: false, error: 'You can only assign reports to users with Auditor role.' };
+    }
+
+    const { data: assetsData, error: assetsError } = await supabase
+      .from('asset')
+      .select('asset_id, asset_code, name, location_id, room_id')
+      .in('asset_id', ids);
+    if (assetsError || !assetsData || assetsData.length === 0) {
+      return { ok: false, error: assetsError?.message ?? 'Could not load selected assets.' };
+    }
+
+    const dueAt =
+      params.dueAt ??
+      (() => {
+        const due = new Date();
+        due.setDate(due.getDate() + 7);
+        return due.toISOString();
+      })();
+
+    const rows = (assetsData as unknown as AssetAssignmentSeedRow[]).map((asset) => ({
+      title: `Condition Report Task · ${asString(asset.asset_code) || 'Asset'}`,
+      asset_id: asset.asset_id,
+      location_id: asset.location_id,
+      room_id: asset.room_id,
+      due_at: dueAt,
+      status: 'Assigned',
+      progress_pct: 0,
+      assigned_user_id: params.assignedUserId,
+      summary: `Condition report for ${asString(asset.name) || 'asset'} (${asString(asset.asset_code)}). Assigned by admin.`,
+      precincts: [] as string[],
+    }));
+
+    const { data, error } = await supabase
+      .from('audit_assignment')
+      .insert(rows)
+      .select(
+        'assignment_id, title, asset_id, location_id, room_id, due_at, status, progress_pct, assigned_user_id, created_by, summary, precincts, created_at, updated_at'
+      );
+    if (error || !data) {
+      return { ok: false, error: error?.message ?? 'Could not create assignments.' };
+    }
+
+    // Create in-app auditor notifications for newly assigned reports.
+    const alerts = (data as unknown as AuditAssignmentRow[]).map((assignment) => ({
+      title: `New audit assigned · ${asString(assignment.title) || 'Condition Report Task'}`,
+      body: `You have been assigned a new audit due ${dateOnly(assignment.due_at) || 'soon'}.`,
+      type: 'Report',
+      severity: 'Info',
+      status: 'Open',
+      kind: 'AssetFlag',
+      read: false,
+      user_id: params.assignedUserId,
+      location_id: assignment.location_id,
+      asset_id: assignment.asset_id,
+      audit_id: assignment.assignment_id,
+    }));
+    if (alerts.length > 0) {
+      const { error: alertError } = await supabase.from('alert').insert(alerts);
+      if (alertError) {
+        return { ok: false, error: `Assignments created but notifications failed: ${alertError.message}` };
+      }
+    }
+
+    return {
+      ok: true,
+      created: (data as unknown as AuditAssignmentRow[]).map(assignmentRowToAuditAssignment),
+    };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? 'Bulk assignment failed.' };
   }
 }
