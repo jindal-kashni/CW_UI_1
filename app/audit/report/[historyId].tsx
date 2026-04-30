@@ -12,14 +12,14 @@ const conditionScore = (value: string) => {
     Good: 2,
     Fair: 3,
     Poor: 4,
-    Dilapidated: 5,
-    Critical: 5,
+    'Needs urgent attention': 5,
   };
   return map[value] ?? 3;
 };
 
 export default function SubmittedReportScreen() {
   const t = useTheme();
+  const [photoMessage, setPhotoMessage] = React.useState<string | null>(null);
   const { historyId } = useLocalSearchParams<{ historyId: string }>();
   const record = historyId ? assetAuditHistory.find((item) => item.id === historyId) : undefined;
   const asset = record ? assetById[record.asset_id] : undefined;
@@ -53,12 +53,7 @@ export default function SubmittedReportScreen() {
 
   const conditionTone =
     conditionScore(asset.condition) >= 5 ? 'bad' : conditionScore(asset.condition) >= 4 ? 'warn' : 'good';
-  const statusLabel =
-    asset.status === 'UnderMaintenance'
-      ? 'Under maintenance'
-      : asset.status === 'OutOfService'
-        ? 'Out of service'
-        : asset.status;
+  const statusLabel = asset.status;
   const SectionHeading = ({ title }: { title: string }) => (
     <Text style={[t.text.title, { fontSize: 22, lineHeight: 28, marginBottom: t.spacing.md }]}>{title}</Text>
   );
@@ -146,7 +141,12 @@ export default function SubmittedReportScreen() {
               ))}
             </View>
           ) : null}
-          <Button label="View attached photos" variant="secondary" onPress={() => {}} />
+          <Button
+            label="View attached photos"
+            variant="secondary"
+            onPress={() => setPhotoMessage(record.photo_taken ? 'Showing photo gallery (prototype).' : 'No photos attached.')}
+          />
+          {photoMessage ? <Text style={[t.text.caption, { color: '#2F5B45' }]}>{photoMessage}</Text> : null}
         </View>
 
         <SectionDivider />

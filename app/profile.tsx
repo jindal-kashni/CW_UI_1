@@ -8,12 +8,39 @@ import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useWorkspace } from '@/src/state/WorkspaceProvider';
 import { useTheme } from '@/src/theme';
+import { fetchUserProfile } from '@/src/services/auth';
+
+function initialsFor(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('')
+    .padEnd(1, 'A');
+}
 
 function AuditorProfileContent() {
   const t = useTheme();
-  const { logout } = useWorkspace();
-  const [displayName, setDisplayName] = React.useState(currentUser.name);
-  const [email, setEmail] = React.useState('auditor@currumbinsanctuary.internal');
+  const { logout, user } = useWorkspace();
+  const [displayName, setDisplayName] = React.useState(user?.user_metadata?.name ?? currentUser.name);
+  const [email, setEmail] = React.useState(user?.email ?? '');
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [roleLabel, setRoleLabel] = React.useState('Auditor');
+
+  React.useEffect(() => {
+    let active = true;
+    (async () => {
+      const profile = await fetchUserProfile(user ?? null);
+      if (!active) return;
+      if (profile?.name) setDisplayName(profile.name);
+      if (profile?.email) setEmail(profile.email);
+      if (profile?.role) setRoleLabel(profile.role === 'admin' ? 'Admin' : 'Auditor');
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  const initials = React.useMemo(() => initialsFor(displayName || 'Auditor'), [displayName]);
   const SectionHeading = ({ title }: { title: string }) => (
     <Text style={[t.text.title, { fontSize: 26, lineHeight: 32, marginBottom: t.spacing.md }]}>{title}</Text>
   );
@@ -31,7 +58,7 @@ function AuditorProfileContent() {
 
   return (
     <ScreenContainer>
-      <TopBar title="Profile" userName={currentUser.name} onPressBack={() => router.back()} />
+      <TopBar title="Profile" userName={displayName || currentUser.name} onPressBack={() => router.back()} />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -56,10 +83,10 @@ function AuditorProfileContent() {
                 justifyContent: 'center',
               }}>
               <Text style={{ color: t.colors.brand.forest, fontWeight: '800', fontSize: 34 }}>
-                {currentUser.initials}
+                {initials}
               </Text>
               <Pressable
-                onPress={() => {}}
+                onPress={() => setMessage('Profile photo upload is enabled in production environment.')}
                 style={({ pressed }) => [
                   {
                     position: 'absolute',
@@ -117,7 +144,7 @@ function AuditorProfileContent() {
                   justifyContent: 'center',
                 }}>
                 <Text style={{ color: t.colors.text.muted, fontSize: 16 }}>
-                  {currentUser.role} (Admin managed)
+                  {roleLabel} (Admin managed)
                 </Text>
               </View>
             </View>
@@ -125,6 +152,7 @@ function AuditorProfileContent() {
         </View>
 
         <SectionDivider />
+        {message ? <Text style={[t.text.caption, { color: '#2F5B45' }]}>{message}</Text> : null}
 
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
           <Pressable

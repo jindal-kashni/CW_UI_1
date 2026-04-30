@@ -9,6 +9,7 @@ import { useTheme } from '@/src/theme';
 export default function AdminLocationsPage() {
   const t = useTheme();
   const [query, setQuery] = React.useState('');
+  const [message, setMessage] = React.useState<string | null>(null);
 
   const rows = adminLocations.filter((location) => {
     if (!query.trim()) return true;
@@ -26,7 +27,7 @@ export default function AdminLocationsPage() {
             Manage the sanctuary location hierarchy and inspection structure.
           </Text>
         </View>
-        <Pressable onPress={() => {}} style={t.button.secondary}>
+        <Pressable onPress={() => setMessage('Location creation opens in the managed admin workflow.')} style={t.button.secondary}>
           <Text style={{ color: t.colors.brand.forest, fontWeight: '700' }}>Add location</Text>
         </Pressable>
       </View>
@@ -35,6 +36,7 @@ export default function AdminLocationsPage() {
       </View>
       <SearchInput value={query} onChangeText={setQuery} placeholder="Search by location name, type, zone or department..." />
       <View style={{ height: t.spacing.lg }} />
+      {message ? <Text style={[t.text.caption, { color: '#2F5B45', marginBottom: t.spacing.sm }]}>{message}</Text> : null}
       <View style={{ gap: t.spacing.md }}>
         {rows.map((location) => (
           <Pressable

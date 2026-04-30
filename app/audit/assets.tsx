@@ -50,13 +50,7 @@ export default function AuditAssetListScreen() {
                 asset={a}
                 locationLabel={label}
                 roomLabel={rm?.name ?? 'Room not set'}
-                statusLabel={
-                  a.status === 'UnderMaintenance'
-                    ? 'Under maintenance'
-                    : a.status === 'Under repair'
-                      ? 'Under repair'
-                      : a.status
-                }
+                statusLabel={a.status}
                 onPress={() => router.push((`/audit/form/${a.id}` as any) as any)}
               />
             );

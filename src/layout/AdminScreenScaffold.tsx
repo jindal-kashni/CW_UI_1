@@ -1,5 +1,11 @@
 import React from 'react';
-import { ScrollView, View, type ViewStyle } from 'react-native';
+import {
+  ScrollView,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ViewStyle,
+} from 'react-native';
 import { router, usePathname, useSegments } from 'expo-router';
 import { useTheme } from '@/src/theme';
 import { AdminAppBottomNav } from './AdminAppBottomNav';
@@ -11,20 +17,24 @@ export function AdminScreenScaffold({
   children,
   scroll = true,
   contentStyle,
+  onScroll,
+  scrollEventThrottle = 16,
 }: {
   title: string;
   children: React.ReactNode;
   scroll?: boolean;
   contentStyle?: ViewStyle;
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  scrollEventThrottle?: number;
 }) {
   const t = useTheme();
   const segments = useSegments();
   const pathname = usePathname();
-  const inAdminTabs = segments[0] === '(admin)';
-  const showBack = !inAdminTabs && pathname.startsWith('/admin/');
+  const inAdminRoot = segments[0] === 'admin';
+  const showBack = inAdminRoot && pathname !== '/admin' && pathname !== '/admin/index';
   const handleAdminBack = React.useCallback(() => {
     if (pathname === '/admin/update-password') {
-      router.replace('/(admin)/profile' as any);
+      router.replace('/admin/profile' as any);
       return;
     }
     if (pathname.startsWith('/admin/locations')) {
@@ -32,14 +42,14 @@ export function AdminScreenScaffold({
       return;
     }
     if (pathname.startsWith('/admin/reports')) {
-      router.replace('/(admin)/reports' as any);
+      router.replace('/admin/reports/assign' as any);
       return;
     }
     if (pathname.startsWith('/admin/assets')) {
-      router.replace('/(admin)/assets' as any);
+      router.replace('/admin/assets' as any);
       return;
     }
-    router.replace('/(admin)/more' as any);
+    router.replace('/admin/settings' as any);
   }, [pathname]);
 
   const content = (
@@ -62,20 +72,22 @@ export function AdminScreenScaffold({
       <TopBar
         title={title}
         userName="Admin"
-        onPressUser={() => router.push('/(admin)/profile' as any)}
+        onPressUser={() => router.push('/admin/profile' as any)}
         onPressBack={showBack ? handleAdminBack : undefined}
       />
       {scroll ? (
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: t.spacing.xxxl }}
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={scrollEventThrottle}>
           {content}
         </ScrollView>
       ) : (
         content
       )}
-      {!inAdminTabs ? <AdminAppBottomNav /> : null}
+      {inAdminRoot ? <AdminAppBottomNav /> : null}
     </ScreenContainer>
   );
 }

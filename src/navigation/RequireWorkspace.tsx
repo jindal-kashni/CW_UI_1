@@ -13,8 +13,9 @@ export function RequireWorkspace({
   role: WorkspaceRole;
   children: ReactNode;
 }) {
-  const { role: current } = useWorkspace();
+  const { role: current, initializing } = useWorkspace();
   // Keep this guard side-effect free; parent flows handle navigation.
+  if (initializing) return null;
   if (current !== role) return null;
   return <>{children}</>;
 }

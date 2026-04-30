@@ -320,13 +320,13 @@ export const adminAlerts: AdminAlertRecord[] = [
   },
   {
     id: 'adm-alert-002',
-    title: 'Dilapidated condition flagged in Reptile House',
+    title: 'Urgent condition flagged in Reptile House',
     type: 'Asset',
     severity: 'Urgent',
     status: 'Open',
     locationId: 'adm-loc-001',
     createdAt: '2026-04-14T06:40:00+10:00',
-    body: 'Primary filtration pump recorded as Dilapidated. Immediate review recommended.',
+    body: 'Primary filtration pump recorded as needing urgent attention. Immediate review recommended.',
   },
   {
     id: 'adm-alert-003',

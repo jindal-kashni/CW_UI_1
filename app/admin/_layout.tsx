@@ -1,5 +1,10 @@
 import { Stack } from 'expo-router';
+import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 
 export default function AdminStackLayout() {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <RequireWorkspace role="admin">
+      <Stack screenOptions={{ headerShown: false }} />
+    </RequireWorkspace>
+  );
 }

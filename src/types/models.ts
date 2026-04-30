@@ -10,14 +10,13 @@ export type AssetCategory =
   | 'Vehicles'
   | 'Safety';
 
+// Matches DB check constraint on `asset.condition`.
 export type AssetCondition =
   | 'Excellent'
   | 'Good'
   | 'Fair'
   | 'Poor'
-  | 'Dilapidated'
-  // Legacy UI value kept for compatibility in prototype state.
-  | 'Critical';
+  | 'Needs urgent attention';
 
 export type AuditStatus = 'Assigned' | 'InProgress' | 'DraftSaved' | 'Submitted' | 'Completed';
 
@@ -46,16 +45,8 @@ export type Asset = {
   description: string;
   make_model: string;
   serial_number: string;
-  status:
-    | 'Active'
-    | 'Under repair'
-    | 'Decommissioned'
-    | 'Disposed'
-    | 'Missing'
-    // Legacy UI values kept for compatibility in prototype state.
-    | 'UnderMaintenance'
-    | 'OutOfService'
-    | 'Retired';
+  // Matches DB check constraint on `asset.status`.
+  status: 'Active' | 'Under repair' | 'Decommissioned' | 'Disposed' | 'Missing';
   // Context
   location_id: ID;
   room_id: ID;
@@ -148,9 +139,18 @@ export type UserProfile = {
   id: ID;
   name: string;
   initials: string;
-  role: 'Auditor';
+  role: 'Admin' | 'Auditor';
   org: string;
   offlineMode: boolean;
   lastSyncAt: string; // ISO date-time
 };
+
+// Friendly display labels used by status pills/cards in the UI.
+export function formatAssetStatus(value: Asset['status']): string {
+  return value;
+}
+
+export function formatAssetCondition(value: AssetCondition): string {
+  return value;
+}
 

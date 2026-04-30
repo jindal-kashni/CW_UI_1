@@ -22,12 +22,14 @@ export function TopBar({
   const { alerts } = useDemoState();
   const pathname = usePathname();
   const segments = useSegments();
-  const inAdminWorkspace = segments[0] === '(admin)' || segments[0] === 'admin';
-  const inAdminTabs = segments[0] === '(admin)';
-  const inAdminAlerts = inAdminTabs && String(segments[1]) === 'alerts';
-  const inAlerts = inAdminAlerts || pathname === '/alerts' || pathname.startsWith('/alerts/');
+  const inAdminWorkspace = segments[0] === 'admin';
+  const inAlerts =
+    pathname === '/admin/alerts' ||
+    pathname.startsWith('/admin/alerts/') ||
+    pathname === '/alerts' ||
+    pathname.startsWith('/alerts/');
   const inProfile = pathname === '/profile';
-  const unreadCount = alerts.filter((a) => !a.read).length;
+  const unreadCount = alerts.filter((a) => !a.read && !a.completedAt).length;
   const effectiveUserName = inAdminWorkspace ? 'Admin' : userName;
 
   return (
@@ -80,7 +82,7 @@ export function TopBar({
             onPress={
               inAlerts
                 ? undefined
-                : () => router.push((inAdminWorkspace ? '/(admin)/alerts' : '/alerts') as any)
+                : () => router.push((inAdminWorkspace ? '/admin/alerts' : '/alerts') as any)
             }
             disabled={inAlerts}
             hitSlop={10}

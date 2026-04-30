@@ -2,15 +2,58 @@ import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ScrollView, Text, View } from 'react-native';
 import { Button, StatusBadge } from '@/src/components';
-import { assetById, departmentById, locationById, roomById } from '@/src/data';
+import { departmentById, locationById, roomById } from '@/src/data';
 import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { fetchAssetById } from '@/src/services/assets';
+import { saveAuditDraft } from '@/src/services/reports';
+import type { Asset } from '@/src/types/models';
 
 function AssetDetailContent() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const asset = id ? assetById[id] : undefined;
+  const [asset, setAsset] = React.useState<Asset | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!id) {
+        if (mounted) {
+          setAsset(null);
+          setLoading(false);
+        }
+        return;
+      }
+      setLoading(true);
+      try {
+        const row = await fetchAssetById(id);
+        if (!mounted) return;
+        setAsset(row);
+      } catch {
+        if (!mounted) return;
+        setAsset(null);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <ScreenContainer>
+        <TopBar title="Asset" userName="Auditor" onPressBack={() => router.back()} />
+        <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
+          <Text style={[t.text.bodyMuted, { marginTop: t.spacing.sm }]}>Loading asset details...</Text>
+        </View>
+      </ScreenContainer>
+    );
+  }
 
   if (!asset) {
     return (
@@ -19,7 +62,7 @@ function AssetDetailContent() {
         <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
           <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Asset not found</Text>
           <Text style={[t.text.bodyMuted, { marginTop: t.spacing.sm }]}>
-            This record isn’t available in the demo data.
+            This record isn’t available or you do not have access.
           </Text>
         </View>
       </ScreenContainer>
@@ -31,14 +74,9 @@ function AssetDetailContent() {
   const department = departmentById[asset.dept_id];
   const fmtCurrency = (n: number) =>
     new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(n);
-  const statusLabel =
-    asset.status === 'UnderMaintenance'
-      ? 'Under maintenance'
-      : asset.status === 'OutOfService'
-        ? 'Out of service'
-        : asset.status;
+  const statusLabel = asset.status;
   const statusTone =
-    statusLabel === 'Active' ? 'good' : statusLabel === 'Under maintenance' || statusLabel === 'Under repair' ? 'warn' : 'bad';
+    statusLabel === 'Active' ? 'good' : statusLabel === 'Under repair' ? 'warn' : 'bad';
   const SectionHeading = ({ title, large = false }: { title: string; large?: boolean }) => (
     <Text
       style={[
@@ -112,9 +150,7 @@ function AssetDetailContent() {
               tone={
                 asset.condition === 'Fair'
                   ? 'warn'
-                  : asset.condition === 'Poor' ||
-                      asset.condition === 'Critical' ||
-                      asset.condition === 'Dilapidated'
+                  : asset.condition === 'Poor' || asset.condition === 'Needs urgent attention'
                     ? 'bad'
                     : 'good'
               }
@@ -153,8 +189,18 @@ function AssetDetailContent() {
         <SectionHeading title="Actions" />
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           <Button label="Start Condition Report" onPress={() => router.push('/audit/select-location' as any)} style={{ flex: 1 }} />
-          <Button label="Add to To-Do List" variant="secondary" onPress={() => {}} style={{ flex: 1 }} />
+          <Button
+            label="Add to To-Do List"
+            variant="secondary"
+            onPress={async () => {
+              if (!asset) return;
+              await saveAuditDraft({ assetId: asset.id, progressPct: 0 });
+              setMessage('Asset added to auditor to-do queue.');
+            }}
+            style={{ flex: 1 }}
+          />
         </View>
+        {message ? <Text style={[t.text.caption, { color: '#2F5B45' }]}>{message}</Text> : null}
       </ScrollView>
       <AppBottomNav />
     </ScreenContainer>

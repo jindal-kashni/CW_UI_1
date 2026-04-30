@@ -5,19 +5,29 @@ import { Button, StatusBadge } from '@/src/components';
 import {
   adminDepartmentById,
   adminLocationById,
-  adminReportById,
   adminReports,
   adminRoomById,
   adminUserById,
 } from '@/src/data/admin';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { fetchAdminReports } from '@/src/services/reports';
+import type { AdminReportRecord } from '@/src/data/admin';
 
 export default function AdminSubmittedReportDetailPage() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const report = id ? adminReportById[id] : undefined;
-  const ordered = [...adminReports]
+  const [reports, setReports] = React.useState<AdminReportRecord[]>(adminReports);
+
+  React.useEffect(() => {
+    (async () => {
+      const rows = await fetchAdminReports();
+      setReports(rows);
+    })();
+  }, []);
+
+  const report = id ? reports.find((item) => item.id === id) : undefined;
+  const ordered = [...reports]
     .filter((item) => item.status === 'Completed')
     .sort((a, b) => new Date(b.submittedAt ?? b.dueDate).getTime() - new Date(a.submittedAt ?? a.dueDate).getTime());
   const idx = ordered.findIndex((r) => r.id === report?.id);
@@ -30,8 +40,8 @@ export default function AdminSubmittedReportDetailPage() {
         <TopBar
           title="Submitted Report"
           userName="Admin"
-          onPressBack={() => router.replace('/(admin)/reports' as any)}
-          onPressUser={() => router.push('/(admin)/profile' as any)}
+          onPressBack={() => router.replace('/admin/reports/assign' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
         />
         <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
           <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Report not found</Text>
@@ -60,8 +70,8 @@ export default function AdminSubmittedReportDetailPage() {
       <TopBar
         title="Submitted Report"
         userName="Admin"
-        onPressBack={() => router.replace('/(admin)/reports' as any)}
-        onPressUser={() => router.push('/(admin)/profile' as any)}
+        onPressBack={() => router.replace('/admin/reports/assign' as any)}
+        onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
         style={{ flex: 1 }}
@@ -152,7 +162,7 @@ export default function AdminSubmittedReportDetailPage() {
           </Pressable>
         </View>
         <View style={{ height: t.spacing.md }} />
-        <Button label="Back to reports" variant="secondary" onPress={() => router.replace('/(admin)/reports' as any)} />
+        <Button label="Back to reports" variant="secondary" onPress={() => router.replace('/admin/reports/assign' as any)} />
       </ScrollView>
       <AdminAppBottomNav />
     </ScreenContainer>

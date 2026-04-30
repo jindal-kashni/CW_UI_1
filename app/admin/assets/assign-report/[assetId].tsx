@@ -37,8 +37,8 @@ export default function AdminAssignConditionReportPage() {
         <TopBar
           title="Assign report"
           userName="Admin"
-          onPressBack={() => router.replace('/(admin)/assets' as any)}
-          onPressUser={() => router.push('/(admin)/profile' as any)}
+          onPressBack={() => router.replace('/admin/assets' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
         />
         <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
           <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Asset not found</Text>
@@ -74,7 +74,7 @@ export default function AdminAssignConditionReportPage() {
       return [...rest, newAssignment];
     });
 
-    router.replace('/(admin)/assets' as any);
+    router.replace('/admin/assets' as any);
   };
 
   return (
@@ -83,7 +83,7 @@ export default function AdminAssignConditionReportPage() {
         title="Assign report"
         userName="Admin"
         onPressBack={() => router.replace(`/admin/assets/${asset.id}` as any)}
-        onPressUser={() => router.push('/(admin)/profile' as any)}
+        onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
         style={{ flex: 1 }}

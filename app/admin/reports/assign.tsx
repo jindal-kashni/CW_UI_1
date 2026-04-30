@@ -113,7 +113,7 @@ export default function AdminAssignReportPage() {
       return [...untouched, ...newAssignments];
     });
 
-    router.replace('/(admin)' as any);
+    router.replace('/admin/reports/assign' as any);
   };
 
   return (
@@ -121,8 +121,8 @@ export default function AdminAssignReportPage() {
       <TopBar
         title="Assign report"
         userName="Admin"
-        onPressBack={() => router.replace('/(admin)' as any)}
-        onPressUser={() => router.push('/(admin)/profile' as any)}
+        onPressBack={() => router.replace('/admin/reports/assign' as any)}
+        onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
         style={{ flex: 1 }}

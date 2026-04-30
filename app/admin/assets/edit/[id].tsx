@@ -3,28 +3,63 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Button, FormField } from '@/src/components';
-import { assetById, assets, departments, locationById, locations, roomById, rooms } from '@/src/data';
+import { assets, departments, locationById, locations, roomById, rooms } from '@/src/data';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import type { Asset } from '@/src/types/models';
+import { fetchAssetById, updateAsset } from '@/src/services/assets';
 
 type DropdownKey = 'status' | 'location' | 'room' | 'category' | 'area' | 'department' | 'criticality';
 
 export default function AdminEditAssetPage() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const asset = id ? assetById[id] : undefined;
+  const [asset, setAsset] = React.useState<Asset | null>(null);
+  const [loading, setLoading] = React.useState(true);
 
-  const [name, setName] = React.useState(asset?.name ?? '');
-  const [notes, setNotes] = React.useState(asset?.notes ?? '');
-  const [status, setStatus] = React.useState<Asset['status']>(asset?.status ?? 'Active');
-  const [locationId, setLocationId] = React.useState(asset?.location_id ?? '');
-  const [roomId, setRoomId] = React.useState(asset?.room_id ?? '');
-  const [category, setCategory] = React.useState(asset?.category ?? '');
-  const [departmentId, setDepartmentId] = React.useState(asset?.dept_id ?? '');
-  const [criticality, setCriticality] = React.useState<Asset['criticality']>(asset?.criticality ?? 'Medium');
+  const [name, setName] = React.useState('');
+  const [notes, setNotes] = React.useState('');
+  const [status, setStatus] = React.useState<Asset['status']>('Active');
+  const [locationId, setLocationId] = React.useState('');
+  const [roomId, setRoomId] = React.useState('');
+  const [category, setCategory] = React.useState('');
+  const [departmentId, setDepartmentId] = React.useState('');
+  const [criticality, setCriticality] = React.useState<Asset['criticality']>('Medium');
   const [wheelFieldKey, setWheelFieldKey] = React.useState<DropdownKey | null>(null);
   const [wheelDraftValue, setWheelDraftValue] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    (async () => {
+      try {
+        const row = await fetchAssetById(id);
+        setAsset(row);
+        if (row) {
+          setName(row.name);
+          setNotes(row.notes);
+          setStatus(row.status);
+          setLocationId(row.location_id);
+          setRoomId(row.room_id);
+          setCategory(row.category);
+          setDepartmentId(row.dept_id);
+          setCriticality(row.criticality);
+          setArea(
+            isBackOfHouse(row.location_id, row.dept_id, row.room_id)
+              ? 'Back of house'
+              : 'Front of house'
+          );
+        }
+      } catch (error) {
+        console.log(error);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [id]);
 
   const isBackOfHouse = React.useCallback((nextLocationId: string, nextDeptId: string, nextRoomId: string) => {
     const nextLocation = locationById[nextLocationId];
@@ -43,11 +78,7 @@ export default function AdminEditAssetPage() {
     );
   }, []);
 
-  const [area, setArea] = React.useState<'Front of house' | 'Back of house'>(() =>
-    isBackOfHouse(asset?.location_id ?? '', asset?.dept_id ?? '', asset?.room_id ?? '')
-      ? 'Back of house'
-      : 'Front of house'
-  );
+  const [area, setArea] = React.useState<'Front of house' | 'Back of house'>('Front of house');
 
   const categoryOptions = React.useMemo(
     () => Array.from(new Set(assets.map((item) => item.category))).sort(),
@@ -59,9 +90,6 @@ export default function AdminEditAssetPage() {
     'Decommissioned',
     'Disposed',
     'Missing',
-    'UnderMaintenance',
-    'OutOfService',
-    'Retired',
   ];
   const locationOptions = React.useMemo(
     () =>
@@ -80,8 +108,24 @@ export default function AdminEditAssetPage() {
   const selectedRoom = roomById[roomId];
   const selectedDepartment = departments.find((d) => d.id === departmentId);
 
-  const displayStatus = (value: Asset['status']) =>
-    value === 'UnderMaintenance' ? 'Under maintenance' : value === 'OutOfService' ? 'Out of service' : value;
+  const displayStatus = (value: Asset['status']) => value;
+
+  if (loading) {
+    return (
+      <ScreenContainer>
+        <TopBar
+          title="Edit Asset"
+          userName="Admin"
+          onPressBack={() => router.replace('/admin/assets' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
+        />
+        <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
+          <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Loading asset...</Text>
+        </View>
+        <AdminAppBottomNav />
+      </ScreenContainer>
+    );
+  }
 
   if (!asset) {
     return (
@@ -89,8 +133,8 @@ export default function AdminEditAssetPage() {
         <TopBar
           title="Edit Asset"
           userName="Admin"
-          onPressBack={() => router.replace('/(admin)/assets' as any)}
-          onPressUser={() => router.push('/(admin)/profile' as any)}
+          onPressBack={() => router.replace('/admin/assets' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
         />
         <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
           <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Asset not found</Text>
@@ -198,8 +242,8 @@ export default function AdminEditAssetPage() {
       <TopBar
         title="Edit Asset"
         userName="Admin"
-        onPressBack={() => router.replace('/(admin)/assets' as any)}
-        onPressUser={() => router.push('/(admin)/profile' as any)}
+        onPressBack={() => router.replace('/admin/assets' as any)}
+        onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
         style={{ flex: 1 }}
@@ -334,22 +378,45 @@ export default function AdminEditAssetPage() {
         <FormField label="Notes" value={notes} onChangeText={setNotes} multiline />
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           <Button
-            label="Save changes"
-            onPress={() => {
-              asset.name = name.trim() || asset.name;
-              asset.status = status;
-              asset.location_id = locationId;
-              asset.room_id = roomId;
-              asset.category = category;
-              asset.dept_id = departmentId;
-              asset.criticality = criticality;
-              asset.notes = notes;
-              asset.updated_at = new Date().toISOString();
-              router.replace((`/admin/assets/${asset.id}` as any) as any);
+            label={saving ? 'Saving...' : 'Save changes'}
+            onPress={async () => {
+              setSaving(true);
+              try {
+                await updateAsset(asset.id, {
+                  name: name.trim() || asset.name,
+                  status,
+                  location_id: locationId,
+                  room_id: roomId,
+                  category,
+                  dept_id: departmentId,
+                  criticality,
+                  notes,
+                });
+                router.replace((`/admin/assets/${asset.id}` as any) as any);
+              } catch (error) {
+                console.log(error);
+              } finally {
+                setSaving(false);
+              }
             }}
             style={{ flex: 1 }}
           />
-          <Button label="Archive asset" variant="secondary" onPress={() => {}} style={{ flex: 1 }} />
+          <Button
+            label="Archive asset"
+            variant="secondary"
+            onPress={async () => {
+              setSaving(true);
+              try {
+                await updateAsset(asset.id, { status: 'Decommissioned' });
+                router.replace((`/admin/assets/${asset.id}` as any) as any);
+              } catch (error) {
+                console.log(error);
+              } finally {
+                setSaving(false);
+              }
+            }}
+            style={{ flex: 1 }}
+          />
         </View>
       </ScrollView>
       <AdminAppBottomNav />

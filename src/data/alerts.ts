@@ -44,7 +44,7 @@ export const alerts: AlertItem[] = [
     id: 'alrt-005',
     kind: 'CriticalCondition',
     title: 'Filtration pressure alert in crocodile habitat',
-    body: 'Saltwater Crocodile Habitat Filtration Pump flagged as Dilapidated.',
+    body: 'Saltwater Crocodile Habitat Filtration Pump flagged as needing urgent attention.',
     createdAt: '2026-04-13T09:22:00+10:00',
     severity: 'Urgent',
     read: false,

@@ -5,7 +5,7 @@ export const conditionOptions: { label: AssetCondition; value: AssetCondition }[
   { label: 'Good', value: 'Good' },
   { label: 'Fair', value: 'Fair' },
   { label: 'Poor', value: 'Poor' },
-  { label: 'Critical', value: 'Critical' },
+  { label: 'Needs urgent attention', value: 'Needs urgent attention' },
 ];
 
 export const criticalityOptions: { label: Criticality; value: Criticality }[] = [

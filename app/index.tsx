@@ -1,6 +1,7 @@
 import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { router } from 'expo-router';
+import type { User } from '@supabase/supabase-js';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +13,8 @@ import {
 import { useTheme } from '@/src/theme';
 import { useWorkspace } from '@/src/state/WorkspaceProvider';
 import { supabase } from '@/utils/supabase';
+import { resolveRoleForUser } from '@/src/services/auth';
+import { fetchAssets } from '@/src/services/assets';
 
 export default function LoginScreen() {
   const t = useTheme();
@@ -22,6 +25,53 @@ export default function LoginScreen() {
   const [remember, setRemember] = React.useState(true);
   const [roleError, setRoleError] = React.useState('');
   const [loading, setLoading] = React.useState(false);
+
+  const resolveRoleWithRetry = React.useCallback(async (initialUser: User | null) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const directRole = await resolveRoleForUser(initialUser ?? null);
+      if (directRole) return directRole;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionRole = await resolveRoleForUser(sessionData.session?.user ?? null);
+      if (sessionRole) return sessionRole;
+
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    return null;
+  }, []);
+
+  const diagnoseRoleLookup = React.useCallback(async (user: User | null) => {
+    if (!user) return 'No signed-in user returned from Supabase.';
+    try {
+      const byId = await supabase
+        .from('user_profile')
+        .select('user_id, email, role')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (byId.error) return `Profile lookup by user_id failed: ${byId.error.message}`;
+      if (byId.data?.role) return null;
+
+      if (user.email) {
+        const byEmail = await supabase
+          .from('user_profile')
+          .select('user_id, email, role')
+          .ilike('email', user.email)
+          .maybeSingle();
+        if (byEmail.error) return `Profile lookup by email failed: ${byEmail.error.message}`;
+        if (byEmail.data?.role) return null;
+      }
+
+      const metaRole =
+        user.app_metadata?.role ?? user.user_metadata?.role ?? user.user_metadata?.workspaceRole;
+      if (typeof metaRole === 'string' && metaRole.trim().length > 0) return null;
+
+      return 'No role found in user_profile or auth metadata.';
+    } catch (err) {
+      return `Role diagnostic failed: ${err instanceof Error ? err.message : 'Unknown error'}`;
+    }
+  }, []);
 
   const onSignIn = async () => {
     clearSignOutMessage();
@@ -48,19 +98,31 @@ export default function LoginScreen() {
       return;
     }
 
-    const userEmail = data.user?.email?.toLowerCase() ?? '';
-
-    // roles defined here
-    if (userEmail.includes('admin')) {
-      setRole('admin');
+    const resolvedRole = await resolveRoleWithRetry(data.user ?? null);
+    if (!resolvedRole) {
       setLoading(false);
-      router.replace('/(admin)' as any);
+      const diagnosis = await diagnoseRoleLookup(data.user ?? null);
+      setRoleError(
+        diagnosis
+          ? `Role lookup failed: ${diagnosis}`
+          : 'Role lookup failed for an unknown reason. Please try again.'
+      );
+      await supabase.auth.signOut();
       return;
     }
 
+    if (resolvedRole === 'admin') {
+      try {
+        await fetchAssets({ offset: 0, limit: 20 });
+      } catch {}
+      setRole('admin');
+      setLoading(false);
+      router.replace('/admin' as any);
+      return;
+    }
     setRole('auditor');
     setLoading(false);
-    router.replace('/(auditor)/audits' as any);
+    router.replace('/audit/history' as any);
   };
 
   return (

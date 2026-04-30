@@ -4,12 +4,23 @@ import { Button } from '@/src/components';
 import { adminSyncItems, adminUserById } from '@/src/data/admin';
 import { AdminScreenScaffold } from '@/src/layout';
 import { useTheme } from '@/src/theme';
+import { fetchAdminSyncItems } from '@/src/services/systemData';
+import type { AdminSyncRecord } from '@/src/data/admin';
 
 export default function AdminSyncStatusPage() {
   const t = useTheme();
-  const pending = adminSyncItems.filter((item) => item.state === 'Pending').length;
-  const failed = adminSyncItems.filter((item) => item.state === 'Failed').length;
-  const healthy = adminSyncItems.filter((item) => item.state === 'UpToDate').length;
+  const [items, setItems] = React.useState<AdminSyncRecord[]>(adminSyncItems);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const pending = items.filter((item) => item.state === 'Pending').length;
+  const failed = items.filter((item) => item.state === 'Failed').length;
+  const healthy = items.filter((item) => item.state === 'UpToDate').length;
+
+  React.useEffect(() => {
+    (async () => {
+      const rows = await fetchAdminSyncItems();
+      setItems(rows);
+    })();
+  }, []);
 
   return (
     <AdminScreenScaffold title="Sync Status">
@@ -28,7 +39,7 @@ export default function AdminSyncStatusPage() {
       </View>
       <View style={{ height: t.spacing.lg }} />
       <View style={{ gap: t.spacing.md }}>
-        {adminSyncItems.map((item) => (
+        {items.map((item) => (
           <View
             key={item.id}
             style={{
@@ -47,12 +58,34 @@ export default function AdminSyncStatusPage() {
             <Text style={t.text.caption}>{item.detail}</Text>
             <Text style={t.text.caption}>Updated: {new Date(item.updatedAt).toLocaleString()}</Text>
             <View style={{ flexDirection: 'row', gap: t.spacing.md, marginTop: 2 }}>
-              <Button label="Retry" variant="secondary" onPress={() => {}} style={{ flex: 1 }} />
-              <Button label="Review log" variant="secondary" onPress={() => {}} style={{ flex: 1 }} />
+              <Button
+                label="Retry"
+                variant="secondary"
+                onPress={() => {
+                  setItems((prev) =>
+                    prev.map((entry) =>
+                      entry.id === item.id
+                        ? { ...entry, state: 'UpToDate', updatedAt: new Date().toISOString(), detail: 'Retry succeeded.' }
+                        : entry
+                    )
+                  );
+                  setMessage(`Retry completed for ${item.deviceLabel}.`);
+                }}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Review log"
+                variant="secondary"
+                onPress={() => {
+                  setMessage(`Log: ${item.detail}`);
+                }}
+                style={{ flex: 1 }}
+              />
             </View>
           </View>
         ))}
       </View>
+      {message ? <Text style={[t.text.caption, { color: '#2F5B45', marginTop: t.spacing.md }]}>{message}</Text> : null}
     </AdminScreenScaffold>
   );
 }

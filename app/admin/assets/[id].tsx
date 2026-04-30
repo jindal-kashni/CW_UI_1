@@ -3,18 +3,18 @@ import { router, useLocalSearchParams } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Button, StatusBadge } from '@/src/components';
-import { assetAuditHistory, assetById, assets, departmentById, locationById, roomById } from '@/src/data';
+import { assetAuditHistory, departmentById, locationById, roomById } from '@/src/data';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
-import type { AssetCondition } from '@/src/types/models';
-import { supabase } from '@/utils/supabase';
+import type { Asset, AssetCondition } from '@/src/types/models';
+import { deleteAsset, fetchAssetById } from '@/src/services/assets';
 
 export default function AdminAssetDetailPage() {
   const t = useTheme();
   const { assignments } = useDemoState();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [asset, setAsset] = React.useState<any | null>(null);
+  const [asset, setAsset] = React.useState<Asset | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [assetPendingDelete, setAssetPendingDelete] = React.useState(false);
   const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
@@ -26,25 +26,20 @@ export default function AdminAssetDetailPage() {
     if (!id) return;
 
     const fetchAsset = async () => {
-      const { data, error } = await supabase
-        .from('asset')
-        .select('*')
-        .eq('asset_id', id)
-        .single();
-
-      console.log('ASSET DETAIL DATA:', data);
-      console.log('ASSET DETAIL ERROR:', error);
-
-      if (error) {
+      try {
+        const data = await fetchAssetById(id);
+        if (!data) {
+          setLoading(false);
+          return;
+        }
+        setAsset(data);
+      } catch (error) {
+        console.log(error);
         setLoading(false);
         return;
+      } finally {
+        setLoading(false);
       }
-
-      setAsset({
-        ...data,
-        id: data.asset_id,
-      });
-      setLoading(false);
     };
 
     fetchAsset();
@@ -65,8 +60,8 @@ export default function AdminAssetDetailPage() {
         <TopBar
           title="Asset Detail"
           userName="Admin"
-          onPressBack={() => router.replace('/(admin)/assets' as any)}
-          onPressUser={() => router.push('/(admin)/profile' as any)}
+          onPressBack={() => router.replace('/admin/assets' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
         />
         <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
           <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Loading asset...</Text>
@@ -82,8 +77,8 @@ export default function AdminAssetDetailPage() {
         <TopBar
           title="Asset Detail"
           userName="Admin"
-          onPressBack={() => router.replace('/(admin)/assets' as any)}
-          onPressUser={() => router.push('/(admin)/profile' as any)}
+          onPressBack={() => router.replace('/admin/assets' as any)}
+          onPressUser={() => router.push('/admin/profile' as any)}
         />
         <View style={{ flex: 1, paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg }}>
           <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Asset not found</Text>
@@ -93,24 +88,24 @@ export default function AdminAssetDetailPage() {
     );
   }
 
-  const location = locationById[asset.location_id];
-  const room = roomById[asset.room_id];
-  const department = departmentById[asset.dept_id];
+  const currentAsset = asset as Asset;
+
+  const location = locationById[currentAsset.location_id];
+  const room = roomById[currentAsset.room_id];
+  const department = departmentById[currentAsset.dept_id];
   const history = assetAuditHistory
-    .filter((h) => h.asset_id === asset.id)
+    .filter((h) => h.asset_id === currentAsset.id)
     .sort((a, b) => new Date(a.audit_date).getTime() - new Date(b.audit_date).getTime());
-  const statusLabel = asset.status === 'UnderMaintenance' ? 'Under maintenance' : asset.status;
+  const statusLabel = currentAsset.status;
   const conditionRank: Record<AssetCondition, number> = {
     Excellent: 5,
     Good: 4,
     Fair: 3,
     Poor: 2,
-    Dilapidated: 1,
-    Critical: 0,
+    'Needs urgent attention': 1,
   };
   const scoreToCondition = (score: number): AssetCondition => {
-    if (score <= 0) return 'Critical';
-    if (score <= 1) return 'Dilapidated';
+    if (score <= 1) return 'Needs urgent attention';
     if (score <= 2) return 'Poor';
     if (score <= 3) return 'Fair';
     if (score <= 4) return 'Good';
@@ -118,8 +113,8 @@ export default function AdminAssetDetailPage() {
   };
   const inferConditionFromFinding = (finding: string, fallback: AssetCondition): AssetCondition => {
     const text = finding.toLowerCase();
-    if (text.includes('critical')) return 'Critical';
-    if (text.includes('dilapidated') || text.includes('cavitation')) return 'Dilapidated';
+    if (text.includes('critical') || text.includes('urgent') || text.includes('cavitation') || text.includes('dilapidated'))
+      return 'Needs urgent attention';
     if (text.includes('poor') || text.includes('failed') || text.includes('corrosion') || text.includes('drop')) {
       return 'Poor';
     }
@@ -132,13 +127,13 @@ export default function AdminAssetDetailPage() {
     }
     return fallback;
   };
-  const purchaseYear = new Date(asset.purchase_date).getFullYear();
-  const expiryYear = purchaseYear + Math.max(1, asset.remaining_life_years);
+  const purchaseYear = new Date(currentAsset.purchase_date).getFullYear();
+  const expiryYear = purchaseYear + Math.max(1, currentAsset.remaining_life_years);
   const reportRows = history.map((h) => {
     const year = new Date(h.audit_date).getFullYear();
     const elapsedRatio = Math.min(1, Math.max(0, (year - purchaseYear) / Math.max(1, expiryYear - purchaseYear)));
     const expectedScoreRaw = 5 - elapsedRatio * 5;
-    const observedCondition = inferConditionFromFinding(h.findings, asset.condition);
+    const observedCondition = inferConditionFromFinding(h.findings, currentAsset.condition);
     const observedScore = conditionRank[observedCondition];
     const expectedCondition = scoreToCondition(expectedScoreRaw);
     const expectedScore = conditionRank[expectedCondition];
@@ -163,7 +158,7 @@ export default function AdminAssetDetailPage() {
   };
   const activeAssignment = assignments.find(
     (assignment) =>
-      assignment.assetId === asset.id &&
+      assignment.assetId === currentAsset.id &&
       ['Assigned', 'InProgress', 'DraftSaved'].includes(assignment.status)
   );
 
@@ -173,8 +168,8 @@ export default function AdminAssetDetailPage() {
       <TopBar
         title="Asset Detail"
         userName="Admin"
-        onPressBack={() => router.replace('/(admin)/assets' as any)}
-        onPressUser={() => router.push('/(admin)/profile' as any)}
+        onPressBack={() => router.replace('/admin/assets' as any)}
+        onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
         style={{ flex: 1 }}
@@ -187,15 +182,15 @@ export default function AdminAssetDetailPage() {
         <View style={{ gap: t.spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing.md }}>
             <View style={{ flex: 1 }}>
-              <Text style={[t.text.title, { fontSize: 26, lineHeight: 32 }]}>{asset.name}</Text>
+              <Text style={[t.text.title, { fontSize: 26, lineHeight: 32 }]}>{currentAsset.name}</Text>
               <Text style={[t.text.caption, { marginTop: 4 }]}>
-                {asset.asset_code} · {asset.category} · {asset.sub_category}
+                {currentAsset.asset_code} · {currentAsset.category} · {currentAsset.sub_category}
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end', gap: t.spacing.sm }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                 <Pressable
-                  onPress={() => router.push((`/admin/assets/edit/${asset.id}` as any) as any)}
+                  onPress={() => router.push((`/admin/assets/edit/${currentAsset.id}` as any) as any)}
                   hitSlop={8}
                   style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}>
                   <FontAwesome name="pencil" size={22} color={t.colors.brand.forest} />
@@ -210,11 +205,11 @@ export default function AdminAssetDetailPage() {
                   style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}>
                   <FontAwesome name="trash" size={22} color="#9C3D37" />
                 </Pressable>
-                <StatusBadge label={statusLabel} tone={statusLabel === 'Active' ? 'good' : 'warn'} />
+              <StatusBadge label={statusLabel} tone={statusLabel === 'Active' ? 'good' : 'warn'} />
               </View>
             </View>
           </View>
-          <Text style={t.text.bodyMuted}>{asset.description}</Text>
+          <Text style={t.text.bodyMuted}>{currentAsset.description}</Text>
         </View>
 
         <SectionDivider />
@@ -229,39 +224,39 @@ export default function AdminAssetDetailPage() {
           <Text style={t.text.caption}>
             <Text style={{ fontWeight: '700' }}>Department:</Text> {department?.name ?? 'Unknown'}
           </Text>
-          <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Assigned to:</Text> {asset.assigned_to}
-          </Text>
+            <Text style={t.text.caption}>
+              <Text style={{ fontWeight: '700' }}>Assigned to:</Text> {currentAsset.assigned_to}
+            </Text>
         </View>
 
         <SectionDivider />
         <SectionHeading title="Condition and criticality" />
         <View style={{ gap: 6 }}>
-          <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Condition:</Text> {asset.condition}
-          </Text>
-          <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Criticality:</Text> {asset.criticality}
-          </Text>
-          <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Remaining life:</Text> {asset.remaining_life_years} years
-          </Text>
+            <Text style={t.text.caption}>
+              <Text style={{ fontWeight: '700' }}>Condition:</Text> {currentAsset.condition}
+            </Text>
+            <Text style={t.text.caption}>
+              <Text style={{ fontWeight: '700' }}>Criticality:</Text> {currentAsset.criticality}
+            </Text>
+            <Text style={t.text.caption}>
+              <Text style={{ fontWeight: '700' }}>Remaining life:</Text> {currentAsset.remaining_life_years} years
+            </Text>
         </View>
 
         <SectionDivider />
         <SectionHeading title="Lifecycle and cost" />
         <View style={{ gap: 6 }}>
+            <Text style={t.text.caption}>
+              <Text style={{ fontWeight: '700' }}>Purchase date:</Text> {new Date(currentAsset.purchase_date).toLocaleDateString()}
+            </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Purchase date:</Text> {new Date(asset.purchase_date).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Purchase cost:</Text> ${currentAsset.purchase_cost.toLocaleString()}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Purchase cost:</Text> ${asset.purchase_cost.toLocaleString()}
+              <Text style={{ fontWeight: '700' }}>Replacement cost:</Text> ${currentAsset.replacement_cost.toLocaleString()}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Replacement cost:</Text> ${asset.replacement_cost.toLocaleString()}
-          </Text>
-          <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Warranty expiry:</Text> {new Date(asset.warranty_expiry).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Warranty expiry:</Text> {new Date(currentAsset.warranty_expiry).toLocaleDateString()}
           </Text>
         </View>
 
@@ -269,16 +264,16 @@ export default function AdminAssetDetailPage() {
         <SectionHeading title="Service history" />
         <View style={{ gap: 6 }}>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Last serviced:</Text> {new Date(asset.last_serviced_date).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Last serviced:</Text> {new Date(currentAsset.last_serviced_date).toLocaleDateString()}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Next service:</Text> {new Date(asset.next_service_date).toLocaleDateString()}
+              <Text style={{ fontWeight: '700' }}>Next service:</Text> {new Date(currentAsset.next_service_date).toLocaleDateString()}
           </Text>
         </View>
 
         <SectionDivider />
         <SectionHeading title="Notes" />
-        <Text style={t.text.caption}>{asset.notes}</Text>
+        <Text style={t.text.caption}>{currentAsset.notes}</Text>
 
         <SectionDivider />
         <SectionHeading title="Condition reports" />
@@ -431,7 +426,7 @@ export default function AdminAssetDetailPage() {
                 : 'Assign condition report'
             }
             variant="secondary"
-            onPress={() => router.push(`/admin/assets/assign-report/${asset.id}` as any)}
+            onPress={() => router.push(`/admin/assets/assign-report/${currentAsset.id}` as any)}
             disabled={Boolean(activeAssignment)}
           />
         </View>
@@ -529,7 +524,7 @@ export default function AdminAssetDetailPage() {
                 <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Delete asset?</Text>
                 <Text style={t.text.caption}>
                   Are you sure you want to delete{' '}
-                  <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{asset.name}</Text>? This action
+                  <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{currentAsset.name}</Text>? This action
                   cannot be undone.
                 </Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: t.spacing.sm }}>
@@ -541,7 +536,7 @@ export default function AdminAssetDetailPage() {
               <>
                 <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Confirm deletion</Text>
                 <Text style={t.text.caption}>
-                  Type <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{asset.name}</Text> to confirm.
+                  Type <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{currentAsset.name}</Text> to confirm.
                 </Text>
                 <TextInput
                   value={deleteNameInput}
@@ -573,21 +568,19 @@ export default function AdminAssetDetailPage() {
                   <Button
                     label="Delete asset"
                     onPress={async () => {
-                      if (deleteNameInput !== asset.name) return;
+                      if (deleteNameInput !== currentAsset.name) return;
 
-                      const { error } = await supabase
-                        .from('asset')
-                        .delete()
-                        .eq('asset_id', asset.id);
-
-                      console.log('DELETE ERROR:', error);
-
-                      if (error) return;
+                      try {
+                        await deleteAsset(currentAsset.id);
+                      } catch (error) {
+                        console.log(error);
+                        return;
+                      }
 
                       setAssetPendingDelete(false);
                       setDeleteStep('confirm');
                       setDeleteNameInput('');
-                      router.replace('/(admin)/assets' as any);
+                      router.replace('/admin/assets' as any);
                     }}
                   />
                 </View>

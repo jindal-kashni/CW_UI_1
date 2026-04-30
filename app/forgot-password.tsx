@@ -10,10 +10,35 @@ import {
   View,
 } from 'react-native';
 import { useTheme } from '@/src/theme';
+import { supabase } from '@/utils/supabase';
 
 export default function ForgotPasswordScreen() {
   const t = useTheme();
   const [email, setEmail] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const onResetPassword = async () => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) {
+      setError('Please enter your email.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalized);
+    setLoading(false);
+
+    if (resetError) {
+      setError(resetError.message);
+      return;
+    }
+
+    setMessage('Reset email sent. Check your inbox for password reset steps.');
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: '#ECEEEA', justifyContent: 'center' }}>
@@ -64,7 +89,8 @@ export default function ForgotPasswordScreen() {
           </View>
 
           <Pressable
-            onPress={() => {}}
+            onPress={onResetPassword}
+            disabled={loading}
             style={({ pressed }) => [
               {
                 marginTop: 20,
@@ -73,13 +99,17 @@ export default function ForgotPasswordScreen() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: t.colors.brand.forest,
-                opacity: pressed ? 0.93 : 1,
+                opacity: loading || pressed ? 0.93 : 1,
               },
             ]}>
             <Text style={{ color: '#F8F7F3', fontWeight: '700', fontSize: 18 }}>
-              Send reset link <FontAwesome name="long-arrow-right" size={16} />
+              {loading ? 'Sending...' : 'Send reset link'} {!loading ? <FontAwesome name="long-arrow-right" size={16} /> : null}
             </Text>
           </Pressable>
+          {message ? (
+            <Text style={[t.text.caption, { marginTop: 12, color: '#2F5B45' }]}>{message}</Text>
+          ) : null}
+          {error ? <Text style={[t.text.caption, { marginTop: 12, color: '#B63E34' }]}>{error}</Text> : null}
 
           <Pressable onPress={() => router.replace('/')} style={{ marginTop: 22, alignSelf: 'center' }}>
             <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700', fontSize: 14 }]}>

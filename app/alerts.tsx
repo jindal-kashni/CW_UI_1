@@ -6,11 +6,14 @@ import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import { useDemoState } from '@/src/state/DemoStateProvider';
+import { markAlertRead } from '@/src/services/systemData';
+import type { AlertItem } from '@/src/types/models';
 
 function AlertsInboxContent() {
   const t = useTheme();
   const [filter, setFilter] = React.useState<'All' | 'Unread' | 'Urgent' | 'Completed'>('All');
-  const { alerts, completeAlert } = useDemoState();
+  const { alerts, setAlerts, completeAlert } = useDemoState();
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const unreadCount = alerts.filter((a) => !a.read && !a.completedAt).length;
 
   const filtered = alerts
@@ -58,11 +61,30 @@ function AlertsInboxContent() {
             <AlertListItem
               key={a.id}
               item={a}
-              onComplete={() => completeAlert(a.id)}
+              onComplete={async () => {
+                setActionError(null);
+                completeAlert(a.id);
+                const stamp = new Date().toISOString();
+                let previous: AlertItem[] = [];
+                setAlerts((prev) => {
+                  previous = prev;
+                  return prev.map((item) =>
+                    item.id === a.id
+                      ? { ...item, read: true, completedAt: item.completedAt ?? stamp }
+                      : item
+                  );
+                });
+                const ok = await markAlertRead(a.id, stamp);
+                if (!ok) {
+                  setAlerts(previous);
+                  setActionError('Could not update alert status. Please try again.');
+                }
+              }}
             />
           ))}
         </View>
       )}
+      {actionError ? <Text style={[t.text.caption, { color: '#B63E34', marginTop: t.spacing.md }]}>{actionError}</Text> : null}
       </ScrollView>
       <AppBottomNav />
     </ScreenContainer>

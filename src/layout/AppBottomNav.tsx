@@ -6,11 +6,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/src/theme';
 
 /** Auditor workspace tab bar only (separate from admin app). */
-const AUDITOR_BASE = '/(auditor)' as const;
+const AUDITOR_BASE = '/audit' as const;
 const items = [
-  { key: 'audits', label: 'Your Reports', icon: 'check-square-o', href: `${AUDITOR_BASE}/audits` },
+  { key: 'audits', label: 'Your Reports', icon: 'check-square-o', href: `${AUDITOR_BASE}/history` },
   { key: 'assets', label: 'Assets', icon: 'th-large', href: `${AUDITOR_BASE}/assets` },
-  { key: 'settings', label: 'Settings', icon: 'cog', href: `${AUDITOR_BASE}/settings` },
+  { key: 'settings', label: 'Settings', icon: 'cog', href: '/profile' },
 ] as const;
 
 function isActive(pathname: string, key: 'audits' | 'assets' | 'settings') {

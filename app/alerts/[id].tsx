@@ -7,11 +7,12 @@ import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 import { getAlertAction, getAlertMeaning } from '@/src/utils/alertMeta';
+import { markAlertRead as markAlertReadRemote } from '@/src/services/systemData';
 
 function AlertDetailContent() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { alerts, markAlertRead } = useDemoState();
+  const { alerts, setAlerts, markAlertRead } = useDemoState();
   const alert = alerts.find((a) => a.id === id);
 
   if (!alert) {
@@ -65,15 +66,25 @@ function AlertDetailContent() {
           <View style={{ gap: t.spacing.md }}>
             <Button
               label={action.label}
-              onPress={() => {
+              onPress={async () => {
                 markAlertRead(alert.id);
+                const stamp = new Date().toISOString();
+                setAlerts((prev) =>
+                  prev.map((item) =>
+                    item.id === alert.id ? { ...item, read: true, completedAt: item.completedAt ?? stamp } : item
+                  )
+                );
+                await markAlertReadRemote(alert.id, stamp);
                 router.push(actionHref);
               }}
             />
             <Button
               label="Mark as read"
               variant="secondary"
-              onPress={() => markAlertRead(alert.id)}
+              onPress={async () => {
+                markAlertRead(alert.id);
+                await markAlertReadRemote(alert.id);
+              }}
             />
           </View>
         </SectionCard>

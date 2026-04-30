@@ -14,7 +14,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to attach condition photos to audit reports.",
+        "NSPhotoLibraryUsageDescription": "This app accesses your photo library to attach existing photos to audit reports."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +26,11 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -30,7 +38,14 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "This app uses the camera to attach condition photos to audit reports.",
+          "photosPermission": "This app accesses your photo library to attach existing photos to audit reports."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

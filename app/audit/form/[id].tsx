@@ -1,6 +1,6 @@
 import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import {
   Button,
   FormField,
@@ -12,6 +12,15 @@ import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { AssetCondition, Criticality } from '@/src/types/models';
+import { saveAuditDraft } from '@/src/services/reports';
+import { saveAuditDraftSnapshot } from '@/src/state/auditDraftStore';
+import {
+  type CapturedPhoto,
+  captureFromCamera,
+  pickFromLibrary,
+  saveAttachmentReference,
+  uploadPhoto,
+} from '@/src/services/photos';
 
 type YesNo = 'Yes' | 'No';
 type Capacity = 'Under' | 'At' | 'Over';
@@ -58,6 +67,88 @@ export default function AuditFormScreen() {
   );
   const [recommendedActions, setRecommendedActions] = React.useState('');
   const [followUpOwner, setFollowUpOwner] = React.useState(isInProgress ? 'Facilities Maintenance' : '');
+  const [savingDraft, setSavingDraft] = React.useState(false);
+  const [photos, setPhotos] = React.useState<
+    { local: CapturedPhoto; uploadStatus: 'pending' | 'uploaded' | 'failed'; remotePath?: string; error?: string }[]
+  >([]);
+  const [photoMessage, setPhotoMessage] = React.useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+
+  const persistDraftSnapshot = React.useCallback(() => {
+    if (!asset) return;
+    saveAuditDraftSnapshot({
+      assetId: asset.id,
+      assignmentId: assignment?.id,
+      findingsSummary,
+      recommendedActions,
+      followUpOwner,
+      comments,
+      photoNotes,
+      photosCaptured: photosCaptured === 'Yes',
+      photos: photos.map((entry) => ({
+        uri: entry.local.uri,
+        remotePath: entry.remotePath,
+        uploadStatus: entry.uploadStatus,
+      })),
+      updatedAt: new Date().toISOString(),
+    });
+  }, [
+    asset,
+    assignment?.id,
+    findingsSummary,
+    recommendedActions,
+    followUpOwner,
+    comments,
+    photoNotes,
+    photosCaptured,
+    photos,
+  ]);
+
+  const handleAttachPhoto = React.useCallback(
+    async (source: 'camera' | 'library') => {
+      if (!asset || photoBusy) return;
+      setPhotoMessage(null);
+      setPhotoBusy(true);
+      try {
+        const photo = source === 'camera' ? await captureFromCamera() : await pickFromLibrary();
+        if (!photo) {
+          setPhotoBusy(false);
+          return;
+        }
+        setPhotosCaptured('Yes');
+        setPhotos((prev) => [...prev, { local: photo, uploadStatus: 'pending' }]);
+        setPhotoCount((prev) => String((Number(prev) || 0) + 1));
+
+        const upload = await uploadPhoto(photo, `asset/${asset.id}`);
+        setPhotos((prev) =>
+          prev.map((entry) =>
+            entry.local.uri === photo.uri
+              ? upload.ok
+                ? { ...entry, uploadStatus: 'uploaded', remotePath: upload.data.publicUrl ?? upload.data.path }
+                : { ...entry, uploadStatus: 'failed', error: upload.error }
+              : entry
+          )
+        );
+        if (!upload.ok) {
+          setPhotoMessage(`Photo saved locally; remote upload failed: ${upload.error}`);
+        } else {
+          setPhotoMessage('Photo uploaded.');
+          if (asset.location_id) {
+            const fileUrl = upload.data.publicUrl ?? upload.data.path;
+            await saveAttachmentReference({
+              locationId: asset.location_id,
+              fileUrl,
+              fileName: photo.fileName,
+              description: `Photo for asset ${asset.asset_code}`,
+            });
+          }
+        }
+      } finally {
+        setPhotoBusy(false);
+      }
+    },
+    [asset, photoBusy]
+  );
 
   if (!asset) {
     return (
@@ -311,15 +402,86 @@ export default function AuditFormScreen() {
                 />
               </>
             ) : null}
-            <Button label="Add photos" variant="secondary" onPress={() => {}} />
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <Button
+                label={photoBusy ? 'Working...' : 'Take photo'}
+                variant="secondary"
+                onPress={() => handleAttachPhoto('camera')}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Choose from library"
+                variant="secondary"
+                onPress={() => handleAttachPhoto('library')}
+                style={{ flex: 1 }}
+              />
+            </View>
+            {photos.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.spacing.md }}>
+                {photos.map((entry) => (
+                  <View key={entry.local.uri} style={{ width: 96 }}>
+                    <Image
+                      source={{ uri: entry.local.uri }}
+                      style={{ width: 96, height: 96, borderRadius: t.radius.md, backgroundColor: '#E1E5DE' }}
+                    />
+                    <Text
+                      style={[
+                        t.text.caption,
+                        { fontSize: 11, marginTop: 4, color: entry.uploadStatus === 'failed' ? '#B63E34' : t.colors.text.muted },
+                      ]}
+                      numberOfLines={1}>
+                      {entry.uploadStatus === 'pending'
+                        ? 'Uploading…'
+                        : entry.uploadStatus === 'uploaded'
+                          ? 'Uploaded'
+                          : 'Local only'}
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        setPhotos((prev) => prev.filter((other) => other.local.uri !== entry.local.uri));
+                        setPhotoCount((prev) => String(Math.max((Number(prev) || 1) - 1, 0)));
+                      }}
+                      style={{ marginTop: 2 }}>
+                      <Text style={[t.text.caption, { fontSize: 11, color: '#B63E34' }]}>Remove</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
+            {photoMessage ? (
+              <Text style={[t.text.caption, { color: t.colors.text.muted }]}>{photoMessage}</Text>
+            ) : null}
           </View>
 
           <View style={{ marginVertical: t.spacing.xl }}>
             <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
           </View>
           <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-            <Button label="Save draft" variant="secondary" onPress={() => {}} style={{ flex: 1 }} />
-            <Button label="Review & submit" onPress={() => router.push((`/audit/review/${asset.id}` as any) as any)} style={{ flex: 1 }} />
+            <Button
+              label={savingDraft ? 'Saving...' : 'Save draft'}
+              variant="secondary"
+              onPress={async () => {
+                if (!asset) return;
+                setSavingDraft(true);
+                persistDraftSnapshot();
+                await saveAuditDraft({
+                  assignmentId: assignment?.id,
+                  assetId: assignment?.id ? undefined : asset.id,
+                  progressPct: 50,
+                });
+                setSavingDraft(false);
+                router.back();
+              }}
+              style={{ flex: 1 }}
+            />
+            <Button
+              label="Review & submit"
+              onPress={() => {
+                persistDraftSnapshot();
+                router.push((`/audit/review/${asset.id}` as any) as any);
+              }}
+              style={{ flex: 1 }}
+            />
           </View>
         </SectionCard>
       </ScrollView>

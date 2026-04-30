@@ -6,7 +6,7 @@ import { Picker } from '@react-native-picker/picker';
 import { Button, FormField, SegmentedControl } from '@/src/components';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
-import { supabase } from '@/utils/supabase';
+import { createAsset } from '@/src/services/assets';
 
 export default function AdminCreateAssetPage() {
   const t = useTheme();
@@ -21,7 +21,9 @@ export default function AdminCreateAssetPage() {
   const [description, setDescription] = React.useState('');
   const [makeModel, setMakeModel] = React.useState('');
   const [serial, setSerial] = React.useState('');
-  const [condition, setCondition] = React.useState<'Good' | 'Fair' | 'Poor' | 'Dilapidated'>('Good');
+  const [condition, setCondition] = React.useState<
+    'Excellent' | 'Good' | 'Fair' | 'Poor' | 'Needs urgent attention'
+  >('Good');
   const [criticality, setCriticality] = React.useState<'Low' | 'Medium' | 'High' | 'Critical'>('Medium');
   const [status, setStatus] = React.useState<'Active' | 'Under repair' | 'Decommissioned'>('Active');
   const [purchaseCost, setPurchaseCost] = React.useState('');
@@ -86,48 +88,42 @@ export default function AdminCreateAssetPage() {
     if (!canSaveAsset) return;
 
     setSaving(true);
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    console.log('SESSION:', session);
-
-    const { data, error } = await supabase
-      .from('asset')
-      .insert([
-        {
-          asset_code: code,
-          name: name,
-          category: category,
-          sub_category: subCategory,
-          description: description,
-          make_model: makeModel,
-          serial_number: serial,
-          condition: condition,
-          criticality: criticality,
-          status: status,
-          purchase_cost: Number(purchaseCost),
-          replacement_cost: Number(replacementCost),
-          purchase_date: purchaseDate,
-          warranty_expiry: warrantyExpiry,
-          assigned_to: assignedTo,
-          last_serviced_date: lastService,
-          remaining_life_years: Number(remainingLife),
-          compatibility_of_use: compatibilityOfUse,
-          environmental_impact: environmentalImpact,
-          notes: notes,
-        },
-      ])
-      .select();
-
-    console.log('CREATE DATA:', data);
-    console.log('CREATE ERROR:', error);
-
+    try {
+      await createAsset({
+        asset_code: code,
+        name: name,
+        category: category,
+        sub_category: subCategory,
+        description: description,
+        make_model: makeModel,
+        serial_number: serial,
+        condition: condition,
+        criticality: criticality,
+        status: status,
+        purchase_cost: Number(purchaseCost),
+        replacement_cost: Number(replacementCost),
+        purchase_date: purchaseDate,
+        warranty_expiry: warrantyExpiry,
+        assigned_to: assignedTo,
+        last_serviced_date: lastService,
+        remaining_life_years: Number(remainingLife),
+        compatibility_of_use: compatibilityOfUse,
+        environmental_impact: environmentalImpact,
+        notes: notes,
+        dept_id: department,
+        location_id: location,
+        room_id: room,
+        utilisation,
+        next_service_date: lastService,
+      });
+    } catch (error) {
+      console.log(error);
+      setSaving(false);
+      return;
+    }
     setSaving(false);
 
-    if (error) return;
-
-    router.replace('/(admin)/assets' as any);
+    router.replace('/admin/assets' as any);
   };
 
   return (
@@ -135,8 +131,8 @@ export default function AdminCreateAssetPage() {
       <TopBar
         title="Create Asset"
         userName="Admin"
-        onPressBack={() => router.replace('/(admin)/assets' as any)}
-        onPressUser={() => router.push('/(admin)/profile' as any)}
+        onPressBack={() => router.replace('/admin/assets' as any)}
+        onPressUser={() => router.push('/admin/profile' as any)}
       />
       <ScrollView
         style={{ flex: 1 }}
@@ -180,10 +176,11 @@ export default function AdminCreateAssetPage() {
             value={condition}
             onChange={setCondition}
             options={[
+              { label: 'Excellent', value: 'Excellent' },
               { label: 'Good', value: 'Good' },
               { label: 'Fair', value: 'Fair' },
               { label: 'Poor', value: 'Poor' },
-              { label: 'Dilapidated', value: 'Dilapidated' },
+              { label: 'Urgent', value: 'Needs urgent attention' },
             ]}
           />
           <Text style={[t.text.caption, { fontWeight: '700' }]}>Criticality</Text>
@@ -269,7 +266,7 @@ export default function AdminCreateAssetPage() {
             <Button
               label="Cancel"
               variant="secondary"
-              onPress={() => router.replace('/(admin)/assets' as any)}
+              onPress={() => router.replace('/admin/assets' as any)}
               style={{ flex: 1 }}
             />
           </View>

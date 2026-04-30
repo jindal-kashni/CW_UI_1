@@ -6,7 +6,7 @@ import { useTheme } from '@/src/theme';
 const groups = [
   { title: 'Categories', values: ['Mechanical', 'Electrical', 'Infrastructure', 'Transport'] },
   { title: 'Sub categories', values: ['Pump', 'Generator', 'Lighting', 'Pathway', 'Service vehicle'] },
-  { title: 'Condition values', values: ['Good', 'Fair', 'Poor', 'Dilapidated'] },
+  { title: 'Condition values', values: ['Excellent', 'Good', 'Fair', 'Poor', 'Needs urgent attention'] },
   { title: 'Criticality values', values: ['Low', 'Medium', 'High', 'Critical'] },
   { title: 'Status values', values: ['Active', 'Under repair', 'Decommissioned'] },
 ];

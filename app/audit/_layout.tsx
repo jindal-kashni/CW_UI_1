@@ -1,5 +1,10 @@
 import { Stack } from 'expo-router';
+import { RequireWorkspace } from '@/src/navigation/RequireWorkspace';
 
 export default function AuditStackLayout() {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <RequireWorkspace role="auditor">
+      <Stack screenOptions={{ headerShown: false }} />
+    </RequireWorkspace>
+  );
 }
