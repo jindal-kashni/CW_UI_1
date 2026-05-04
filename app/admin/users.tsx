@@ -138,6 +138,7 @@ export default function AdminUsersPage() {
   const [userPendingRoleEdit, setUserPendingRoleEdit] = React.useState<AdminUserRecord | null>(null);
   const [roleDraft, setRoleDraft] = React.useState<'Admin' | 'Auditor'>('Auditor');
   const [updatingRole, setUpdatingRole] = React.useState(false);
+  const [expandedLocationId, setExpandedLocationId] = React.useState<string | null>(null);
 
   const messageTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -682,39 +683,99 @@ export default function AdminUsersPage() {
             {!loadingLocations && filteredLocations.length === 0 ? (
               <Text style={t.text.caption}>No locations found yet.</Text>
             ) : !loadingLocations ? (
-              filteredLocations.map((location) => (
-                <View
-                  key={location.id}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: t.colors.border.subtle,
-                    borderRadius: t.radius.lg,
-                    backgroundColor: t.colors.card.surface,
-                    paddingHorizontal: t.spacing.md,
-                    paddingVertical: t.spacing.md,
-                    gap: 6,
-                  }}
-                >
-                  <Text style={[t.text.body, { fontWeight: '700' }]}>{location.name}</Text>
+              filteredLocations.map((location) => {
+                const expanded = expandedLocationId === location.id;
 
-                  <Text style={t.text.caption}>
-                    {location.type || 'Location'} · {location.siteZone || 'No zone'} ·{' '}
-                    {departmentNamesById[location.departmentId] ?? 'Unknown department'}
-                  </Text>
+                return (
+                  <View
+                    key={location.id}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: t.colors.border.subtle,
+                      borderRadius: t.radius.lg,
+                      backgroundColor: t.colors.card.surface,
+                      paddingHorizontal: t.spacing.md,
+                      paddingVertical: t.spacing.md,
+                      gap: 6,
+                    }}
+                  >
+                    <Text style={[t.text.body, { fontWeight: '700' }]}>{location.name}</Text>
 
-                  <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-                    <Pressable onPress={() => openEditLocation(location)}>
-                      <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700' }]}>
-                        Edit
-                      </Text>
-                    </Pressable>
+                    <Text style={t.text.caption}>
+                      {location.type || 'Location'} · {location.siteZone || 'No zone'} ·{' '}
+                      {departmentNamesById[location.departmentId] ?? 'Unknown department'}
+                    </Text>
 
-                    <Pressable onPress={() => setLocationPendingDelete(location)}>
-                      <Text style={[t.text.caption, { color: '#B63E34', fontWeight: '700' }]}>Delete</Text>
-                    </Pressable>
+                    {expanded ? (
+                      <View
+                        style={{
+                          marginTop: t.spacing.sm,
+                          borderTopWidth: 1,
+                          borderTopColor: t.colors.border.subtle,
+                          paddingTop: t.spacing.sm,
+                          gap: 4,
+                        }}
+                      >
+                        <Text style={t.text.caption}>Location ID: {location.id}</Text>
+                        <Text style={t.text.caption}>Name: {location.name || '—'}</Text>
+                        <Text style={t.text.caption}>Type: {location.type || '—'}</Text>
+                        <Text style={t.text.caption}>Site zone: {location.siteZone || '—'}</Text>
+                        <Text style={t.text.caption}>
+                          Department: {departmentNamesById[location.departmentId] ?? '—'}
+                        </Text>
+                        <Text style={t.text.caption}>Department ID: {location.departmentId || '—'}</Text>
+                        <Text style={t.text.caption}>Star rating: {location.starRating ?? '—'}</Text>
+                        <Text style={t.text.caption}>
+                          Evacuation plan: {location.evacuationPlanStatus || '—'}
+                        </Text>
+                        <Text style={t.text.caption}>
+                          Heritage listed: {location.heritageListed ? 'Yes' : 'No'}
+                        </Text>
+                        <Text style={t.text.caption}>Iconic: {location.iconic ? 'Yes' : 'No'}</Text>
+                        <Text style={t.text.caption}>
+                          Social significance: {location.socialSignificance || '—'}
+                        </Text>
+                        <Text style={t.text.caption}>
+                          Cultural heritage: {location.culturalHeritage || '—'}
+                        </Text>
+                        <Text style={t.text.caption}>
+                          Community attachment: {location.communityAttachment || '—'}
+                        </Text>
+                        <Text style={t.text.caption}>
+                          Government commitment: {location.governmentCommitment || '—'}
+                        </Text>
+                        <Text style={t.text.caption}>Inspection date: {location.inspectionDate || '—'}</Text>
+                        <Text style={t.text.caption}>Inspector name: {location.inspectorName || '—'}</Text>
+                        <Text style={t.text.caption}>
+                          Assessor comments: {location.assessorComments || '—'}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+                      <Pressable
+                        onPress={() =>
+                          setExpandedLocationId((current) => (current === location.id ? null : location.id))
+                        }
+                      >
+                        <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700' }]}>
+                          {expanded ? 'Hide details' : 'View details'}
+                        </Text>
+                      </Pressable>
+
+                      <Pressable onPress={() => openEditLocation(location)}>
+                        <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700' }]}>
+                          Edit
+                        </Text>
+                      </Pressable>
+
+                      <Pressable onPress={() => setLocationPendingDelete(location)}>
+                        <Text style={[t.text.caption, { color: '#B63E34', fontWeight: '700' }]}>Delete</Text>
+                      </Pressable>
+                    </View>
                   </View>
-                </View>
-              ))
+                );
+              })
             ) : null}
           </>
         ) : null}
