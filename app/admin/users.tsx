@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import type { AdminUserRecord } from '@/src/data/admin';
 import { SearchInput } from '@/src/components';
 import { AdminScreenScaffold } from '@/src/layout';
@@ -57,6 +58,17 @@ type RoomDraft = {
   notes: string;
 };
 
+type AdminFilterKey =
+  | 'locationDepartment'
+  | 'locationSiteZone'
+  | 'locationType'
+  | 'roomLocation';
+
+type FilterOption = {
+  label: string;
+  value: string;
+};
+
 const emptyLocationDraft = (): LocationDraft => ({
   id: '',
   name: '',
@@ -112,6 +124,9 @@ export default function AdminUsersPage() {
   const [locations, setLocations] = React.useState<LocationRecord[]>([]);
   const [loadingLocations, setLoadingLocations] = React.useState(true);
   const [locationQuery, setLocationQuery] = React.useState('');
+  const [locationDepartmentFilter, setLocationDepartmentFilter] = React.useState('');
+  const [locationSiteZoneFilter, setLocationSiteZoneFilter] = React.useState('');
+  const [locationTypeFilter, setLocationTypeFilter] = React.useState('');
   const [departmentNamesById, setDepartmentNamesById] = React.useState<Record<string, string>>({});
   const [locationDraft, setLocationDraft] = React.useState<LocationDraft>(emptyLocationDraft());
   const [showLocationModal, setShowLocationModal] = React.useState(false);
@@ -122,6 +137,7 @@ export default function AdminUsersPage() {
   const [rooms, setRooms] = React.useState<RoomRecord[]>([]);
   const [loadingRooms, setLoadingRooms] = React.useState(true);
   const [roomQuery, setRoomQuery] = React.useState('');
+  const [roomLocationFilter, setRoomLocationFilter] = React.useState('');
   const [locationNamesById, setLocationNamesById] = React.useState<Record<string, string>>({});
   const [roomDraft, setRoomDraft] = React.useState<RoomDraft>(emptyRoomDraft());
   const [showRoomModal, setShowRoomModal] = React.useState(false);
@@ -139,6 +155,9 @@ export default function AdminUsersPage() {
   const [roleDraft, setRoleDraft] = React.useState<'Admin' | 'Auditor'>('Auditor');
   const [updatingRole, setUpdatingRole] = React.useState(false);
   const [expandedLocationId, setExpandedLocationId] = React.useState<string | null>(null);
+
+  const [filterPickerOpen, setFilterPickerOpen] = React.useState<AdminFilterKey | null>(null);
+  const [filterPickerDraftValue, setFilterPickerDraftValue] = React.useState('');
 
   const messageTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -458,21 +477,92 @@ export default function AdminUsersPage() {
     }
   };
 
+  const makeOptions = (values: string[]): FilterOption[] =>
+    Array.from(new Set(values.filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ label: value, value }));
+
+  const filterLabels: Record<AdminFilterKey, string> = {
+    locationDepartment: 'Department',
+    locationSiteZone: 'Site zone',
+    locationType: 'Location type',
+    roomLocation: 'Location',
+  };
+
+  const filterValues: Record<AdminFilterKey, string> = {
+    locationDepartment: locationDepartmentFilter,
+    locationSiteZone: locationSiteZoneFilter,
+    locationType: locationTypeFilter,
+    roomLocation: roomLocationFilter,
+  };
+
+  const filterOptions: Record<AdminFilterKey, FilterOption[]> = {
+    locationDepartment: makeOptions(departments.map((dept) => dept.name)),
+    locationSiteZone: makeOptions(locations.map((location) => location.siteZone)),
+    locationType: makeOptions(locations.map((location) => location.type)),
+    roomLocation: makeOptions(locations.map((location) => location.name)),
+  };
+
+  const setFilterValue = (key: AdminFilterKey, value: string) => {
+    if (key === 'locationDepartment') setLocationDepartmentFilter(value);
+    if (key === 'locationSiteZone') setLocationSiteZoneFilter(value);
+    if (key === 'locationType') setLocationTypeFilter(value);
+    if (key === 'roomLocation') setRoomLocationFilter(value);
+  };
+
+  const openFilterPicker = (key: AdminFilterKey) => {
+    setFilterPickerOpen(key);
+    setFilterPickerDraftValue(filterValues[key]);
+  };
+
+  const clearAdminFilters = () => {
+    setLocationQuery('');
+    setRoomQuery('');
+    setLocationDepartmentFilter('');
+    setLocationSiteZoneFilter('');
+    setLocationTypeFilter('');
+    setRoomLocationFilter('');
+  };
+
+  const hasAdminFilters =
+    Boolean(locationQuery) ||
+    Boolean(roomQuery) ||
+    Boolean(locationDepartmentFilter) ||
+    Boolean(locationSiteZoneFilter) ||
+    Boolean(locationTypeFilter) ||
+    Boolean(roomLocationFilter);
+
   const filteredLocations = locations
     .filter((location) => {
-      if (!locationQuery.trim()) return true;
-      const q = locationQuery.toLowerCase();
       const department = departmentNamesById[location.departmentId] ?? '';
-      return `${location.name} ${location.siteZone} ${location.type} ${department}`.toLowerCase().includes(q);
+
+      if (locationDepartmentFilter && department !== locationDepartmentFilter) return false;
+      if (locationSiteZoneFilter && location.siteZone !== locationSiteZoneFilter) return false;
+      if (locationTypeFilter && location.type !== locationTypeFilter) return false;
+
+      if (!locationQuery.trim()) return true;
+
+      const q = locationQuery.toLowerCase();
+
+      return `${location.name} ${location.siteZone} ${location.type} ${department}`
+        .toLowerCase()
+        .includes(q);
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const filteredRooms = rooms
     .filter((room) => {
-      if (!roomQuery.trim()) return true;
-      const q = roomQuery.toLowerCase();
       const locationName = locationNamesById[room.locationId] ?? '';
-      return `${room.name} ${room.roomNumber} ${room.floorLevel} ${locationName} ${room.notes}`.toLowerCase().includes(q);
+
+      if (roomLocationFilter && locationName !== roomLocationFilter) return false;
+
+      if (!roomQuery.trim()) return true;
+
+      const q = roomQuery.toLowerCase();
+
+      return `${room.name} ${room.roomNumber} ${room.floorLevel} ${locationName} ${room.notes}`
+        .toLowerCase()
+        .includes(q);
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -486,6 +576,35 @@ export default function AdminUsersPage() {
     paddingHorizontal: t.spacing.md,
     fontSize: 15,
   };
+
+  const AdminDropdownField = ({ fieldKey }: { fieldKey: AdminFilterKey }) => (
+    <View style={{ flex: 1, gap: 6 }}>
+      <Text style={[t.text.caption, { fontWeight: '700' }]}>{filterLabels[fieldKey]}</Text>
+
+      <Pressable
+        onPress={() => openFilterPicker(fieldKey)}
+        style={({ pressed }) => [
+          {
+            minHeight: 52,
+            borderWidth: 1,
+            borderColor: t.colors.border.subtle,
+            borderRadius: t.radius.lg,
+            backgroundColor: t.colors.card.surface,
+            paddingHorizontal: t.spacing.md,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexDirection: 'row',
+            opacity: pressed ? 0.96 : 1,
+          },
+        ]}
+      >
+        <Text style={[t.text.body, { color: filterValues[fieldKey] ? t.colors.text.primary : t.colors.text.muted }]}>
+          {filterValues[fieldKey] || 'Select an option'}
+        </Text>
+        <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
+      </Pressable>
+    </View>
+  );
 
   return (
     <AdminScreenScaffold title="Users">
@@ -673,6 +792,41 @@ export default function AdminUsersPage() {
               placeholder="Search by location name, type, zone or department..."
             />
 
+            <View style={{ gap: t.spacing.md }}>
+              <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+                <AdminDropdownField fieldKey="locationDepartment" />
+                <AdminDropdownField fieldKey="locationSiteZone" />
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+                <AdminDropdownField fieldKey="locationType" />
+                <View style={{ flex: 1 }} />
+              </View>
+            </View>
+
+            {hasAdminFilters ? (
+            <View style={{ alignItems: 'flex-start' }}>
+              <Pressable
+                onPress={clearAdminFilters}
+                style={({ pressed }) => [
+                  {
+                    minHeight: 40,
+                    borderWidth: 1,
+                    borderColor: 'rgba(0,74,38,0.42)',
+                    borderRadius: 999,
+                    paddingHorizontal: 16,
+                    justifyContent: 'center',
+                    backgroundColor: pressed ? 'rgba(0,74,38,0.20)' : 'rgba(0,74,38,0.14)',
+                  },
+                ]}
+              >
+                <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>
+                  Reset filters
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
             {loadingLocations ? (
               <View style={{ minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <ActivityIndicator size="small" color={t.colors.brand.forest} />
@@ -794,6 +948,34 @@ export default function AdminUsersPage() {
               onChangeText={setRoomQuery}
               placeholder="Search by room name, number, floor, location or notes..."
             />
+
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <AdminDropdownField fieldKey="roomLocation" />
+              <View style={{ flex: 1 }} />
+            </View>
+
+            {hasAdminFilters ? (
+            <View style={{ alignItems: 'flex-start' }}>
+              <Pressable
+                onPress={clearAdminFilters}
+                style={({ pressed }) => [
+                  {
+                    minHeight: 40,
+                    borderWidth: 1,
+                    borderColor: 'rgba(0,74,38,0.42)',
+                    borderRadius: 999,
+                    paddingHorizontal: 16,
+                    justifyContent: 'center',
+                    backgroundColor: pressed ? 'rgba(0,74,38,0.20)' : 'rgba(0,74,38,0.14)',
+                  },
+                ]}
+              >
+                <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>
+                  Reset filters
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
 
             {loadingRooms ? (
               <View style={{ minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -1500,6 +1682,82 @@ export default function AdminUsersPage() {
                 <Text style={{ color: '#fff', fontWeight: '700' }}>{deletingRoom ? 'Deleting...' : 'Delete'}</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={Boolean(filterPickerOpen)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFilterPickerOpen(null)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.18)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: t.spacing.xl,
+          }}
+        >
+          <Pressable
+            onPress={() => setFilterPickerOpen(null)}
+            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+          />
+
+          <View
+            style={{
+              width: '100%',
+              maxWidth: 560,
+              borderWidth: 1,
+              borderColor: t.colors.border.subtle,
+              borderRadius: t.radius.lg,
+              backgroundColor: t.colors.card.surface,
+              overflow: 'hidden',
+            }}
+          >
+            <View
+              style={{
+                minHeight: 46,
+                paddingHorizontal: t.spacing.md,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderBottomWidth: 1,
+                borderBottomColor: t.colors.border.subtle,
+              }}
+            >
+              <Pressable onPress={() => setFilterPickerOpen(null)}>
+                <Text style={{ color: t.colors.text.muted, fontWeight: '700' }}>Cancel</Text>
+              </Pressable>
+
+              <Text style={[t.text.caption, { fontWeight: '700' }]}>
+                {filterPickerOpen ? filterLabels[filterPickerOpen] : 'Select option'}
+              </Text>
+
+              <Pressable
+                onPress={() => {
+                  if (filterPickerOpen) setFilterValue(filterPickerOpen, filterPickerDraftValue);
+                  setFilterPickerOpen(null);
+                }}
+              >
+                <Text style={{ color: t.colors.brand.forest, fontWeight: '700' }}>Done</Text>
+              </Pressable>
+            </View>
+
+            <Picker
+              selectedValue={filterPickerDraftValue}
+              onValueChange={(value) => setFilterPickerDraftValue(String(value))}
+              style={{ height: 230 }}
+              itemStyle={{ fontSize: 18 }}
+            >
+              <Picker.Item label="All" value="" />
+              {filterPickerOpen
+                ? filterOptions[filterPickerOpen].map((option) => (
+                    <Picker.Item key={option.value} label={option.label} value={option.value} />
+                  ))
+                : null}
+            </Picker>
           </View>
         </View>
       </Modal>
