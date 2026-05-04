@@ -5,53 +5,100 @@ import { Button } from '@/src/components';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
-import type { AuditAssignment, Assessor } from '@/src/types/models';
 import { fetchAssetById } from '@/src/services/assets';
 import { fetchAdminUsers } from '@/src/services/users';
+import { createAuditAssignmentsBulk, fetchAuditAssignments } from '@/src/services/reports';
 import { resolveDepartmentNames, resolveLocationNames } from '@/src/services/lookups';
 import type { AdminUserRecord } from '@/src/data/admin';
-
-function toAssessor(user: { id: string; name: string }): Assessor {
-  return {
-    id: user.id,
-    name: user.name,
-    role: 'Auditor',
-    org: 'Currumbin Wildlife Sanctuary',
-  };
-}
 
 export default function AdminAssignConditionReportPage() {
   const t = useTheme();
   const { setAssignments } = useDemoState();
   const { assetId } = useLocalSearchParams<{ assetId: string }>();
+
   const [asset, setAsset] = React.useState<any | null>(null);
   const [loadingAsset, setLoadingAsset] = React.useState(true);
+  const [assigning, setAssigning] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+
   const [locationNameById, setLocationNameById] = React.useState<Record<string, string>>({});
   const [departmentNameById, setDepartmentNameById] = React.useState<Record<string, string>>({});
   const [auditors, setAuditors] = React.useState<AdminUserRecord[]>([]);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     (async () => {
-      const [users, assetRow] = await Promise.all([
-        fetchAdminUsers(),
-        assetId ? fetchAssetById(assetId) : Promise.resolve(null),
-      ]);
-      const activeAuditors = users.filter((u) => u.role === 'Auditor' && u.status === 'Active');
-      setAuditors(activeAuditors);
-      setSelectedId(activeAuditors[0]?.id ?? null);
-      setAsset(assetRow);
-      if (assetRow?.location_id) {
-        setLocationNameById(await resolveLocationNames([assetRow.location_id]));
+      try {
+        const [users, assetRow] = await Promise.all([
+          fetchAdminUsers(),
+          assetId ? fetchAssetById(assetId) : Promise.resolve(null),
+        ]);
+
+        const activeAuditors = users.filter((u) => u.role === 'Auditor' && u.status === 'Active');
+
+        setAuditors(activeAuditors);
+        setSelectedId(activeAuditors.length ? activeAuditors[0].id : null);
+        setAsset(assetRow);
+
+        if (assetRow?.location_id) {
+          setLocationNameById(await resolveLocationNames([assetRow.location_id]));
+        }
+
+        const deptIds = activeAuditors
+          .map((row) => row.departmentId)
+          .filter((id): id is string => Boolean(id));
+
+        if (deptIds.length) {
+          setDepartmentNameById(await resolveDepartmentNames(deptIds));
+        }
+      } catch (error) {
+        console.log(error);
+        setMessage('Unable to load assignment page.');
+      } finally {
+        setLoadingAsset(false);
       }
-      const deptIds = activeAuditors.map((row) => row.departmentId).filter(Boolean);
-      if (deptIds.length) {
-        setDepartmentNameById(await resolveDepartmentNames(deptIds));
-      }
-      setLoadingAsset(false);
     })();
   }, [assetId]);
 
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const onConfirm = async () => {
+    const user = auditors.find((u) => u.id === selectedId);
+    if (!user || !asset) return;
+
+    setAssigning(true);
+    setMessage(null);
+
+    try {
+      const due = new Date();
+      due.setDate(due.getDate() + 7);
+
+      const result = await createAuditAssignmentsBulk({
+        assignedUserId: user.id,
+        assetIds: [asset.id],
+        dueAt: due.toISOString(),
+      });
+
+      if (!result.ok) {
+        setMessage(result.error ?? 'Could not assign report.');
+        setAssigning(false);
+        return;
+      }
+
+      const refreshed = await fetchAuditAssignments();
+
+      if (refreshed.length > 0) {
+        setAssignments(refreshed);
+      } else if (result.created) {
+        setAssignments((prev) => [...prev, ...result.created!]);
+      }
+
+      router.replace('/admin/assets' as any);
+    } catch (error) {
+      console.log(error);
+      setMessage('Could not assign report.');
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   if (loadingAsset) {
     return (
@@ -87,35 +134,6 @@ export default function AdminAssignConditionReportPage() {
     );
   }
 
-  const onConfirm = () => {
-    const user = auditors.find((u) => u.id === selectedId);
-    if (!user) return;
-
-    const due = new Date();
-    due.setDate(due.getDate() + 7);
-    const dueAt = due.toISOString().slice(0, 10);
-
-    const newAssignment: AuditAssignment = {
-      id: `aud-assign-${Date.now()}`,
-      title: `Condition Report Task · ${asset.asset_code}`,
-      dueAt,
-      locationScope: { precincts: [locationNameById[asset.location_id] ?? 'Location'] },
-      assetId: asset.id,
-      status: 'Assigned',
-      progressPct: 0,
-      assignedTo: toAssessor(user),
-      summary: `Condition report for ${asset.name} (${asset.asset_code}). Assigned by admin.`,
-    };
-
-    setAssignments((prev) => {
-      const open: AuditAssignment['status'][] = ['Assigned', 'InProgress', 'DraftSaved'];
-      const rest = prev.filter((a) => !(a.assetId === asset.id && open.includes(a.status)));
-      return [...rest, newAssignment];
-    });
-
-    router.replace('/admin/assets' as any);
-  };
-
   return (
     <ScreenContainer>
       <TopBar
@@ -124,6 +142,7 @@ export default function AdminAssignConditionReportPage() {
         onPressBack={() => router.replace(`/admin/assets/${asset.id}` as any)}
         onPressUser={() => router.push('/admin/profile' as any)}
       />
+
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -131,11 +150,14 @@ export default function AdminAssignConditionReportPage() {
           paddingTop: t.spacing.lg,
           paddingBottom: t.spacing.xxxl,
           gap: t.spacing.lg,
-        }}>
+        }}
+      >
         <Text style={[t.text.title, { fontSize: 28, lineHeight: 34 }]}>Assign condition report</Text>
+
         <Text style={[t.text.caption, { marginTop: -4 }]}>
-          Choose a team member to complete a condition report for this asset. They will see it in their To Do list.
+          Choose an auditor to complete a condition report for this asset.
         </Text>
+
         <View style={{ marginTop: t.spacing.sm }}>
           <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
         </View>
@@ -148,7 +170,8 @@ export default function AdminAssignConditionReportPage() {
             backgroundColor: t.colors.card.surfaceAlt,
             paddingHorizontal: t.spacing.md,
             paddingVertical: t.spacing.sm,
-          }}>
+          }}
+        >
           <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{asset.name}</Text>
           <Text style={t.text.caption}>
             {asset.asset_code} · {locationNameById[asset.location_id] ?? 'Unknown location'}
@@ -156,6 +179,7 @@ export default function AdminAssignConditionReportPage() {
         </View>
 
         <Text style={[t.text.title, { fontSize: 18, lineHeight: 24 }]}>Team member</Text>
+
         {auditors.length === 0 ? (
           <Text style={t.text.caption}>No active auditors are available to assign.</Text>
         ) : (
@@ -163,6 +187,7 @@ export default function AdminAssignConditionReportPage() {
             {auditors.map((u) => {
               const selected = selectedId === u.id;
               const dept = departmentNameById[u.departmentId] ?? '';
+
               return (
                 <Pressable
                   key={u.id}
@@ -180,7 +205,8 @@ export default function AdminAssignConditionReportPage() {
                       paddingHorizontal: t.spacing.md,
                       paddingVertical: t.spacing.md,
                     },
-                  ]}>
+                  ]}
+                >
                   <Text style={{ fontWeight: '700', color: t.colors.brand.forest }}>{u.name}</Text>
                   <Text style={t.text.caption}>{u.email}</Text>
                   {dept ? <Text style={[t.text.caption, { marginTop: 4 }]}>{dept}</Text> : null}
@@ -190,13 +216,16 @@ export default function AdminAssignConditionReportPage() {
           </View>
         )}
 
+        {message ? <Text style={[t.text.caption, { color: '#B63E34' }]}>{message}</Text> : null}
+
         <Button
-          label="Confirm assignment"
+          label={assigning ? 'Assigning...' : 'Confirm assignment'}
           onPress={onConfirm}
           style={{ marginTop: t.spacing.md }}
-          disabled={!selectedId || auditors.length === 0}
+          disabled={assigning || !selectedId || auditors.length === 0}
         />
       </ScrollView>
+
       <AdminAppBottomNav />
     </ScreenContainer>
   );
