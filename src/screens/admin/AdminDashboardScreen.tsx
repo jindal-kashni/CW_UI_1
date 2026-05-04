@@ -140,15 +140,15 @@ export default function AdminDashboardScreen() {
     (async () => {
       const userIds = Array.from(
         new Set([
-          ...reports.map((report) => report.assignedUserId).filter(Boolean),
-          ...activityTimeline.map((activity) => activity.userId).filter(Boolean),
-        ])
+          ...reports.map((report) => report.assignedUserId),
+          ...activityTimeline.map((activity) => activity.userId),
+        ].filter((id): id is string => Boolean(id)))
       );
       const locationIds = Array.from(
         new Set([
-          ...reports.map((report) => report.locationId).filter(Boolean),
-          ...activityTimeline.map((activity) => activity.locationId).filter(Boolean),
-        ])
+          ...reports.map((report) => report.locationId),
+          ...activityTimeline.map((activity) => activity.locationId),
+        ].filter((id): id is string => Boolean(id)))
       );
       const [users, locations] = await Promise.all([
         userIds.length ? resolveUserNames(userIds) : Promise.resolve({}),

@@ -325,3 +325,39 @@ export async function deleteAsset(id: string): Promise<void> {
   const { error } = await supabase.from('asset').delete().eq('asset_id', id);
   if (error) throw error;
 }
+
+export async function searchAssets(params: {
+  query?: string;
+  category?: string;
+  condition?: string;
+  criticality?: string;
+  status?: string;
+  dept_id?: string;
+  location_id?: string;
+  room_id?: string;
+}) {
+  let queryBuilder = supabase
+    .from('asset')
+    .select(ASSET_COLUMNS)
+    .order('name', { ascending: true });
+
+  if (params.query && params.query.trim()) {
+    queryBuilder = queryBuilder.or(
+      `name.ilike.%${params.query}%,asset_code.ilike.%${params.query}%,category.ilike.%${params.query}%,description.ilike.%${params.query}%`
+    );
+  }
+
+  if (params.category) queryBuilder = queryBuilder.eq('category', params.category);
+  if (params.condition) queryBuilder = queryBuilder.eq('condition', params.condition);
+  if (params.criticality) queryBuilder = queryBuilder.eq('criticality', params.criticality);
+  if (params.status) queryBuilder = queryBuilder.eq('status', params.status);
+  if (params.dept_id) queryBuilder = queryBuilder.eq('dept_id', params.dept_id);
+  if (params.location_id) queryBuilder = queryBuilder.eq('location_id', params.location_id);
+  if (params.room_id) queryBuilder = queryBuilder.eq('room_id', params.room_id);
+
+  const { data, error } = await queryBuilder.limit(100);
+
+  if (error) throw error;
+
+  return (data as any[]).map(mapAssetRow);
+}

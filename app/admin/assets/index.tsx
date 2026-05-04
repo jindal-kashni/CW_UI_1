@@ -8,8 +8,16 @@ import { AdminScreenScaffold } from '@/src/layout';
 import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { Asset } from '@/src/types/models';
-import { deleteAsset, fetchAssets } from '@/src/services/assets';
+import { deleteAsset, fetchAssets, searchAssets } from '@/src/services/assets';
 import { resolveDepartmentNames, resolveLocationNames, resolveRoomNames } from '@/src/services/lookups';
+import {
+  fetchDepartments,
+  fetchLocations,
+  fetchRooms,
+  type DepartmentRecord,
+  type LocationRecord,
+  type RoomRecord,
+} from '@/src/services/referenceData';
 
 type DropdownKey =
   | 'category'
@@ -20,23 +28,105 @@ type DropdownKey =
   | 'department'
   | 'location'
   | 'room';
+
 type FilterMode = 'search' | 'filters';
 
 export default function AdminAssetsPage() {
   const t = useTheme();
   const { assignments } = useDemoState();
+
   const [assetRows, setAssetRows] = React.useState<Asset[]>([]);
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = 600;
   const [offset, setOffset] = React.useState(0);
   const [hasMore, setHasMore] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
+
   const [departmentNamesById, setDepartmentNamesById] = React.useState<Record<string, string>>({});
   const [locationNamesById, setLocationNamesById] = React.useState<Record<string, string>>({});
   const [roomNamesById, setRoomNamesById] = React.useState<Record<string, string>>({});
 
+  const [allDepartments, setAllDepartments] = React.useState<DepartmentRecord[]>([]);
+  const [allLocations, setAllLocations] = React.useState<LocationRecord[]>([]);
+  const [allRooms, setAllRooms] = React.useState<RoomRecord[]>([]);
+
+  const [query, setQuery] = React.useState('');
+  const [filterMode, setFilterMode] = React.useState<FilterMode>('search');
+  const [category, setCategory] = React.useState<string | undefined>(undefined);
+  const [condition, setCondition] = React.useState<string | undefined>(undefined);
+  const [criticality, setCriticality] = React.useState<string | undefined>(undefined);
+  const [status, setStatus] = React.useState<string | undefined>(undefined);
+  const [area, setArea] = React.useState<string | undefined>(undefined);
+  const [department, setDepartment] = React.useState<string | undefined>(undefined);
+  const [location, setLocation] = React.useState<string | undefined>(undefined);
+  const [room, setRoom] = React.useState<string | undefined>(undefined);
+
+  const [sortBy, setSortBy] = React.useState<'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow'>(
+    'alphabetical'
+  );
+
+  const [wheelFieldKey, setWheelFieldKey] = React.useState<DropdownKey | null>(null);
+  const [wheelDraftValue, setWheelDraftValue] = React.useState('');
+  const [sortWheelOpen, setSortWheelOpen] = React.useState(false);
+  const [sortWheelDraftValue, setSortWheelDraftValue] = React.useState<
+    'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow'
+  >('alphabetical');
+
+  const [assetPendingDelete, setAssetPendingDelete] = React.useState<Asset | null>(null);
+  const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
+  const [deleteNameInput, setDeleteNameInput] = React.useState('');
+  const [searchResults, setSearchResults] = React.useState<Asset[]>([]);
+  const [loadingSearch, setLoadingSearch] = React.useState(false);
+
   React.useEffect(() => {
     loadAssets();
   }, []);
+
+  React.useEffect(() => {
+    const loadFilterReferenceData = async () => {
+      try {
+        const [departments, locations, rooms] = await Promise.all([
+          fetchDepartments(),
+          fetchLocations(),
+          fetchRooms(),
+        ]);
+
+        setAllDepartments(departments);
+        setAllLocations(locations);
+        setAllRooms(rooms);
+      } catch (error) {
+        console.log(error);
+      }
+    };
+
+    loadFilterReferenceData();
+  }, []);
+
+  React.useEffect(() => {
+  const timeout = setTimeout(async () => {
+    setLoadingSearch(true);
+
+    try {
+      const results = await searchAssets({
+        query,
+        category,
+        condition,
+        criticality,
+        status,
+        dept_id: allDepartments.find(d => d.name === department)?.id,
+        location_id: allLocations.find(l => l.name === location)?.id,
+        room_id: allRooms.find(r => r.name === room)?.id,
+      });
+
+      setSearchResults(results);
+    } catch (err) {
+      console.log(err);
+    } finally {
+      setLoadingSearch(false);
+    }
+  }, 300); // debounce
+
+  return () => clearTimeout(timeout);
+}, [query, category, condition, criticality, status, department, location, room]);
 
   const loadAssets = async (nextOffset = 0, append = false) => {
     try {
@@ -52,11 +142,17 @@ export default function AdminAssetsPage() {
   React.useEffect(() => {
     (async () => {
       if (assetRows.length === 0) return;
+
+      const departmentIds = assetRows.map((row) => row.dept_id).filter((id): id is string => Boolean(id));
+      const locationIds = assetRows.map((row) => row.location_id).filter((id): id is string => Boolean(id));
+      const roomIds = assetRows.map((row) => row.room_id).filter((id): id is string => Boolean(id));
+
       const [departmentMap, locationMap, roomMap] = await Promise.all([
-        resolveDepartmentNames(assetRows.map((row) => row.dept_id).filter(Boolean)),
-        resolveLocationNames(assetRows.map((row) => row.location_id).filter(Boolean)),
-        resolveRoomNames(assetRows.map((row) => row.room_id).filter(Boolean)),
+        resolveDepartmentNames(departmentIds),
+        resolveLocationNames(locationIds),
+        resolveRoomNames(roomIds),
       ]);
+
       setDepartmentNamesById(departmentMap);
       setLocationNamesById(locationMap);
       setRoomNamesById(roomMap);
@@ -71,57 +167,53 @@ export default function AdminAssetsPage() {
   };
 
   const handleScroll = React.useCallback(
-    ({ nativeEvent }: { nativeEvent: { layoutMeasurement: { height: number }; contentOffset: { y: number }; contentSize: { height: number } } }) => {
+    ({
+      nativeEvent,
+    }: {
+      nativeEvent: {
+        layoutMeasurement: { height: number };
+        contentOffset: { y: number };
+        contentSize: { height: number };
+      };
+    }) => {
       const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
       const threshold = 140;
       const nearBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - threshold;
-      if (nearBottom) {
-        loadMoreAssets();
-      }
+      if (nearBottom) loadMoreAssets();
     },
     [loadMoreAssets]
   );
 
-  const [query, setQuery] = React.useState('');
-  const [filterMode, setFilterMode] = React.useState<FilterMode>('search');
-  const [category, setCategory] = React.useState<string | undefined>(undefined);
-  const [condition, setCondition] = React.useState<string | undefined>(undefined);
-  const [criticality, setCriticality] = React.useState<string | undefined>(undefined);
-  const [status, setStatus] = React.useState<string | undefined>(undefined);
-  const [area, setArea] = React.useState<string | undefined>(undefined);
-  const [department, setDepartment] = React.useState<string | undefined>(undefined);
-  const [location, setLocation] = React.useState<string | undefined>(undefined);
-  const [room, setRoom] = React.useState<string | undefined>(undefined);
-  const [sortBy, setSortBy] = React.useState<'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow'>(
-    'alphabetical'
-  );
-  const [wheelFieldKey, setWheelFieldKey] = React.useState<DropdownKey | null>(null);
-  const [wheelDraftValue, setWheelDraftValue] = React.useState('');
-  const [sortWheelOpen, setSortWheelOpen] = React.useState(false);
-  const [sortWheelDraftValue, setSortWheelDraftValue] = React.useState<
-    'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow'
-  >('alphabetical');
-  const [assetPendingDelete, setAssetPendingDelete] = React.useState<Asset | null>(null);
-  const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
-  const [deleteNameInput, setDeleteNameInput] = React.useState('');
-
-  const categories = Array.from(new Set(assetRows.map((a) => a.category)));
-  const conditions = ['Excellent', 'Good', 'Fair', 'Poor', 'Needs urgent attention'];
-  const criticalities = ['Low', 'Medium', 'High', 'Critical'];
-  const statuses = ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'];
-  const areaOptions = ['Front of house', 'Back of house'];
   const departmentName = (asset: Asset) => departmentNamesById[asset.dept_id] || 'Unknown';
   const locationName = (asset: Asset) => locationNamesById[asset.location_id] || 'Unknown';
   const roomName = (asset: Asset) => roomNamesById[asset.room_id] || 'Unknown';
-  const departments = Array.from(new Set(assetRows.map((a) => departmentName(a))));
-  const locations = Array.from(new Set(assetRows.map((a) => locationName(a))));
-  const rooms = Array.from(
-    new Set(
-      assetRows
-        .filter((a) => !location || locationName(a) === location)
-        .map((a) => roomName(a))
-    )
+
+  const categories = Array.from(new Set(assetRows.map((a) => a.category).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
   );
+
+  const conditions = ['Excellent', 'Good', 'Fair', 'Poor', 'Needs urgent attention'];
+  const criticalities = ['Low', 'Medium', 'High', 'Critical'];
+  const statuses = ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'];
+  const areaOptions = ['Back of house', 'Front of house'];
+
+  const departments = allDepartments
+    .map((item) => item.name)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+
+  const locations = allLocations
+    .map((item) => item.name)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+
+  const selectedLocationId = allLocations.find((item) => item.name === location)?.id;
+
+  const rooms = allRooms
+    .filter((item) => !selectedLocationId || item.locationId === selectedLocationId)
+    .map((item) => item.name)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
 
   const statusLabel = (asset: Asset) => asset.status;
 
@@ -272,7 +364,8 @@ export default function AdminAssetsPage() {
               flexDirection: 'row',
               opacity: pressed ? 0.96 : 1,
             },
-          ]}>
+          ]}
+        >
           <Text style={[t.text.body, { color: field.value ? t.colors.text.primary : t.colors.text.muted }]}>
             {field.value ?? (field.key === 'room' && !location ? 'Select location first' : 'Select an option')}
           </Text>
@@ -281,44 +374,10 @@ export default function AdminAssetsPage() {
       </View>
     </View>
   );
+
   const filterField = (key: DropdownKey) => filterFields.find((field) => field.key === key)!;
 
-  const rows = assetRows
-    .filter((a) => (filterMode === 'filters' ? (!category ? true : a.category === category) : true))
-    .filter((a) => (filterMode === 'filters' ? (!condition ? true : a.condition === condition) : true))
-    .filter((a) => (filterMode === 'filters' ? (!criticality ? true : a.criticality === criticality) : true))
-    .filter((a) => (filterMode === 'filters' ? (!status ? true : statusLabel(a) === status) : true))
-    .filter((a) => (filterMode === 'filters' ? (!area ? true : houseAreaForAsset(a) === area) : true))
-    .filter((a) =>
-      filterMode === 'filters'
-        ? !department || departmentName(a) === department
-        : true
-    )
-    .filter((a) =>
-      filterMode === 'filters'
-        ? !location || locationName(a) === location
-        : true
-    )
-    .filter((a) =>
-      filterMode === 'filters' ? (!room ? true : roomName(a) === room) : true
-    )
-    .filter((a) => {
-      if (filterMode !== 'search') return true;
-      if (!query.trim()) return true;
-      const q = query.trim().toLowerCase();
-      const hay =
-        `${a.name} ${a.asset_code} ${a.category} ${a.sub_category} ${locationName(a)} ${roomName(a)} ${departmentName(a)} ${a.condition} ${a.criticality}`.toLowerCase();
-      return hay.includes(q);
-    })
-    .sort((a, b) => {
-      if (sortBy === 'alphabetical') return a.name.localeCompare(b.name);
-      if (sortBy === 'conditionLowHigh') {
-        const order = ['Needs urgent attention', 'Poor', 'Fair', 'Good', 'Excellent'];
-        return order.indexOf(a.condition) - order.indexOf(b.condition);
-      }
-      return ['Critical', 'High', 'Medium', 'Low'].indexOf(a.criticality) -
-        ['Critical', 'High', 'Medium', 'Low'].indexOf(b.criticality);
-    });
+  const rows = searchResults;
 
   const assignmentInProgressFor = (assetId: string) => {
     return assignments.find(
@@ -334,12 +393,9 @@ export default function AdminAssetsPage() {
       if (value === 'Fair') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
       return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
     }
-    if (kind === 'criticality') {
-      if (value === 'Low') return { bg: 'rgba(30,31,28,0.10)', text: '#474B44' };
-      if (value === 'Medium') return { bg: 'rgba(82,117,151,0.16)', text: '#314F6B' };
-      if (value === 'High') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
-      return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
-    }
+    if (value === 'Low') return { bg: 'rgba(30,31,28,0.10)', text: '#474B44' };
+    if (value === 'Medium') return { bg: 'rgba(82,117,151,0.16)', text: '#314F6B' };
+    if (value === 'High') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
     return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
   };
 
@@ -354,6 +410,7 @@ export default function AdminAssetsPage() {
         </View>
         <ButtonLike label="Add asset" variant="primary" onPress={() => router.push('/admin/assets/create' as any)} />
       </View>
+
       <View style={{ marginTop: t.spacing.md, marginBottom: t.spacing.sm }}>
         <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
       </View>
@@ -378,15 +435,18 @@ export default function AdminAssetsPage() {
                       ? 'rgba(30,31,28,0.04)'
                       : t.colors.card.surface,
               },
-            ]}>
+            ]}
+          >
             <Text
               style={[
                 t.text.caption,
                 { fontWeight: '700', color: filterMode === 'search' ? t.colors.brand.forest : t.colors.text.secondary },
-              ]}>
+              ]}
+            >
               Search
             </Text>
           </Pressable>
+
           <Pressable
             onPress={() => setFilterMode('filters')}
             style={({ pressed }) => [
@@ -405,18 +465,18 @@ export default function AdminAssetsPage() {
                       ? 'rgba(30,31,28,0.04)'
                       : t.colors.card.surface,
               },
-            ]}>
+            ]}
+          >
             <Text
               style={[
                 t.text.caption,
-                {
-                  fontWeight: '700',
-                  color: filterMode === 'filters' ? t.colors.brand.forest : t.colors.text.secondary,
-                },
-              ]}>
+                { fontWeight: '700', color: filterMode === 'filters' ? t.colors.brand.forest : t.colors.text.secondary },
+              ]}
+            >
               Search by filters
             </Text>
           </Pressable>
+
           <View style={{ flex: 1 }} />
           <ButtonLike label="Reference data" onPress={() => router.push('/admin/reference-data' as any)} />
         </View>
@@ -425,8 +485,7 @@ export default function AdminAssetsPage() {
           <SearchInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search asset code, name, location, room, condition..."
-          />
+            placeholder="Search asset name, code, category or description..."          />
         ) : (
           <View style={{ gap: t.spacing.md }}>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
@@ -463,7 +522,8 @@ export default function AdminAssetsPage() {
                   justifyContent: 'center',
                   backgroundColor: pressed ? 'rgba(0,74,38,0.20)' : 'rgba(0,74,38,0.14)',
                 },
-              ]}>
+              ]}
+            >
               <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>
                 Reset filters
               </Text>
@@ -480,6 +540,7 @@ export default function AdminAssetsPage() {
         <Text style={[t.text.title, { fontSize: 26, lineHeight: 32, marginBottom: t.spacing.md }]}>
           Asset Results
         </Text>
+
         <Pressable
           onPress={openSortSelector}
           hitSlop={8}
@@ -497,14 +558,26 @@ export default function AdminAssetsPage() {
               justifyContent: 'space-between',
               opacity: pressed ? 0.96 : 1,
             },
-          ]}>
+          ]}
+        >
           <Text style={[t.text.body, { color: t.colors.text.primary }]}>Sort: {sortLabel}</Text>
           <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
         </Pressable>
       </View>
+
       <Text style={[t.text.caption, { marginTop: -t.spacing.md, marginBottom: t.spacing.md }]}>
         Table view for quick scanning and comparison.
       </Text>
+
+      {loadingSearch && (
+        <View style={{ paddingVertical: 10 }}>
+          <ActivityIndicator size="small" />
+        </View>
+      )}
+
+      {!loadingSearch && rows.length === 0 && (
+        <Text style={t.text.caption}>No assets found.</Text>
+      )}
 
       <View
         style={{
@@ -513,7 +586,8 @@ export default function AdminAssetsPage() {
           borderRadius: t.radius.lg,
           overflow: 'hidden',
           backgroundColor: t.colors.card.surface,
-        }}>
+        }}
+      >
         <View
           style={{
             flexDirection: 'row',
@@ -523,7 +597,8 @@ export default function AdminAssetsPage() {
             backgroundColor: t.colors.card.surfaceAlt,
             borderBottomWidth: 1,
             borderBottomColor: t.colors.border.subtle,
-          }}>
+          }}
+        >
           <Text style={[t.text.caption, { flex: 2.8, fontWeight: '700' }]}>Asset</Text>
           <Text style={[t.text.caption, { flex: 2.2, fontWeight: '700' }]}>Location Context</Text>
           <Text style={[t.text.caption, { flex: 1, fontWeight: '700', textAlign: 'center' }]}>Condition</Text>
@@ -553,7 +628,8 @@ export default function AdminAssetsPage() {
                   borderBottomColor: t.colors.border.subtle,
                   backgroundColor: pressed ? 'rgba(31,59,44,0.04)' : 'transparent',
                 },
-              ]}>
+              ]}
+            >
               <View style={{ flex: 2.8, paddingRight: t.spacing.md }}>
                 <Text style={[t.text.body, { fontWeight: '700', color: t.colors.brand.forest }]}>{a.name}</Text>
                 <Text style={[t.text.caption, { marginTop: 2 }]}>
@@ -577,10 +653,9 @@ export default function AdminAssetsPage() {
                     paddingVertical: 7,
                     backgroundColor: conditionColors.bg,
                     maxWidth: '100%',
-                  }}>
-                  <Text
-                    style={{ color: conditionColors.text, fontSize: 12, fontWeight: '700', lineHeight: 16 }}
-                    numberOfLines={2}>
+                  }}
+                >
+                  <Text style={{ color: conditionColors.text, fontSize: 12, fontWeight: '700', lineHeight: 16 }} numberOfLines={2}>
                     {a.condition === 'Needs urgent attention' ? 'Urgent' : a.condition}
                   </Text>
                 </View>
@@ -594,10 +669,9 @@ export default function AdminAssetsPage() {
                     paddingHorizontal: 12,
                     paddingVertical: 7,
                     backgroundColor: criticalityColors.bg,
-                  }}>
-                  <Text style={{ color: criticalityColors.text, fontSize: 12, fontWeight: '700' }}>
-                    {a.criticality}
-                  </Text>
+                  }}
+                >
+                  <Text style={{ color: criticalityColors.text, fontSize: 12, fontWeight: '700' }}>{a.criticality}</Text>
                 </View>
               </View>
 
@@ -605,19 +679,19 @@ export default function AdminAssetsPage() {
                 <Pressable
                   onPress={() => router.push(`/admin/assets/assign-report/${a.id}` as any)}
                   hitSlop={8}
-                  style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}>
-                  <FontAwesome
-                    name={currentAssignment ? 'check-circle' : 'user-plus'}
-                    size={16}
-                    color="#2F5B45"
-                  />
+                  style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}
+                >
+                  <FontAwesome name={currentAssignment ? 'check-circle' : 'user-plus'} size={16} color="#2F5B45" />
                 </Pressable>
+
                 <Pressable
                   onPress={() => router.push((`/admin/assets/edit/${a.id}` as any) as any)}
                   hitSlop={8}
-                  style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}>
+                  style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}
+                >
                   <FontAwesome name="pencil" size={17} color={t.colors.brand.forest} />
                 </Pressable>
+
                 <Pressable
                   onPress={() => {
                     setAssetPendingDelete(a);
@@ -625,7 +699,8 @@ export default function AdminAssetsPage() {
                     setDeleteNameInput('');
                   }}
                   hitSlop={8}
-                  style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}>
+                  style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}
+                >
                   <FontAwesome name="trash" size={17} color="#9C3D37" />
                 </Pressable>
               </View>
@@ -633,6 +708,7 @@ export default function AdminAssetsPage() {
           );
         })}
       </View>
+
       {hasMore ? (
         <View style={{ marginTop: t.spacing.md, alignItems: 'center', minHeight: 36, justifyContent: 'center' }}>
           {loadingMore ? <ActivityIndicator size="small" color={t.colors.brand.forest} /> : null}
@@ -646,7 +722,8 @@ export default function AdminAssetsPage() {
         onRequestClose={() => {
           setWheelFieldKey(null);
           setSortWheelOpen(false);
-        }}>
+        }}
+      >
         <View
           style={{
             flex: 1,
@@ -654,7 +731,8 @@ export default function AdminAssetsPage() {
             alignItems: 'center',
             justifyContent: 'center',
             paddingHorizontal: t.spacing.xl,
-          }}>
+          }}
+        >
           <Pressable
             onPress={() => {
               setWheelFieldKey(null);
@@ -662,6 +740,7 @@ export default function AdminAssetsPage() {
             }}
             style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
           />
+
           <View
             style={{
               width: '100%',
@@ -671,7 +750,8 @@ export default function AdminAssetsPage() {
               borderRadius: t.radius.lg,
               backgroundColor: t.colors.card.surface,
               overflow: 'hidden',
-            }}>
+            }}
+          >
             <View
               style={{
                 minHeight: 46,
@@ -681,19 +761,23 @@ export default function AdminAssetsPage() {
                 justifyContent: 'space-between',
                 borderBottomWidth: 1,
                 borderBottomColor: t.colors.border.subtle,
-              }}>
+              }}
+            >
               <Pressable
                 onPress={() => {
                   setWheelFieldKey(null);
                   setSortWheelOpen(false);
-                }}>
+                }}
+              >
                 <Text style={{ color: t.colors.text.muted, fontWeight: '700' }}>Cancel</Text>
               </Pressable>
+
               <Text style={[t.text.caption, { fontWeight: '700' }]}>
                 {sortWheelOpen
                   ? 'Sort assets'
                   : filterFields.find((field) => field.key === wheelFieldKey)?.label ?? 'Select an option'}
               </Text>
+
               <Pressable
                 onPress={() => {
                   if (sortWheelOpen) {
@@ -701,13 +785,16 @@ export default function AdminAssetsPage() {
                     setSortWheelOpen(false);
                     return;
                   }
+
                   const activeField = filterFields.find((field) => field.key === wheelFieldKey);
                   activeField?.onSelect(wheelDraftValue ? wheelDraftValue : undefined);
                   setWheelFieldKey(null);
-                }}>
+                }}
+              >
                 <Text style={{ color: t.colors.brand.forest, fontWeight: '700' }}>Done</Text>
               </Pressable>
             </View>
+
             {sortWheelOpen ? (
               <Picker
                 selectedValue={sortWheelDraftValue}
@@ -715,7 +802,8 @@ export default function AdminAssetsPage() {
                   setSortWheelDraftValue(value as 'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow')
                 }
                 style={{ height: 230 }}
-                itemStyle={{ fontSize: 18 }}>
+                itemStyle={{ fontSize: 18 }}
+              >
                 <Picker.Item label="Sort alphabetic (A-Z)" value="alphabetical" />
                 <Picker.Item label="Condition (Low-High)" value="conditionLowHigh" />
                 <Picker.Item label="Criticality (High-Low)" value="criticalityHighLow" />
@@ -725,13 +813,9 @@ export default function AdminAssetsPage() {
                 selectedValue={wheelDraftValue}
                 onValueChange={(value) => setWheelDraftValue(String(value))}
                 style={{ height: 230 }}
-                itemStyle={{ fontSize: 18 }}>
-                <Picker.Item
-                  label={
-                    wheelFieldKey === 'room' && !location ? 'Select location first' : 'Select an option'
-                  }
-                  value=""
-                />
+                itemStyle={{ fontSize: 18 }}
+              >
+                <Picker.Item label={wheelFieldKey === 'room' && !location ? 'Select location first' : 'Select an option'} value="" />
                 {(filterFields.find((field) => field.key === wheelFieldKey)?.options ?? []).map((option) => (
                   <Picker.Item key={option.value} label={option.label} value={option.value} />
                 ))}
@@ -749,7 +833,8 @@ export default function AdminAssetsPage() {
           setAssetPendingDelete(null);
           setDeleteStep('confirm');
           setDeleteNameInput('');
-        }}>
+        }}
+      >
         <View
           style={{
             flex: 1,
@@ -757,7 +842,8 @@ export default function AdminAssetsPage() {
             alignItems: 'center',
             justifyContent: 'center',
             paddingHorizontal: t.spacing.xl,
-          }}>
+          }}
+        >
           <Pressable
             onPress={() => {
               setAssetPendingDelete(null);
@@ -766,6 +852,7 @@ export default function AdminAssetsPage() {
             }}
             style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
           />
+
           <View
             style={{
               width: '100%',
@@ -776,17 +863,17 @@ export default function AdminAssetsPage() {
               backgroundColor: t.colors.card.surface,
               padding: t.spacing.lg,
               gap: t.spacing.md,
-            }}>
+            }}
+          >
             {deleteStep === 'confirm' ? (
               <>
                 <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Delete asset?</Text>
                 <Text style={t.text.caption}>
                   Are you sure you want to delete{' '}
-                  <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>
-                    {assetPendingDelete?.name}
-                  </Text>
-                  ? This action cannot be undone.
+                  <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{assetPendingDelete?.name}</Text>? This action
+                  cannot be undone.
                 </Text>
+
                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: t.spacing.sm }}>
                   <ButtonLike
                     label="Cancel"
@@ -796,24 +883,17 @@ export default function AdminAssetsPage() {
                       setDeleteNameInput('');
                     }}
                   />
-                  <ButtonLike
-                    label="Yes, continue"
-                    onPress={() => {
-                      setDeleteStep('type-name');
-                    }}
-                  />
+                  <ButtonLike label="Yes, continue" onPress={() => setDeleteStep('type-name')} />
                 </View>
               </>
             ) : (
               <>
                 <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Confirm deletion</Text>
                 <Text style={t.text.caption}>
-                  Type{' '}
-                  <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>
-                    {assetPendingDelete?.name}
-                  </Text>{' '}
-                  to confirm.
+                  Type <Text style={{ fontWeight: '700', color: t.colors.text.primary }}>{assetPendingDelete?.name}</Text> to
+                  confirm.
                 </Text>
+
                 <TextInput
                   value={deleteNameInput}
                   onChangeText={setDeleteNameInput}
@@ -831,6 +911,7 @@ export default function AdminAssetsPage() {
                     fontSize: 16,
                   }}
                 />
+
                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: t.spacing.sm }}>
                   <ButtonLike
                     label="Cancel"
@@ -845,6 +926,7 @@ export default function AdminAssetsPage() {
                     onPress={async () => {
                       if (!assetPendingDelete) return;
                       if (deleteNameInput !== assetPendingDelete.name) return;
+
                       await deleteAsset(assetPendingDelete.id);
                       setAssetRows((prev) => prev.filter((item) => item.id !== assetPendingDelete.id));
                       setAssetPendingDelete(null);
@@ -874,6 +956,7 @@ function ButtonLike({
 }) {
   const isPrimary = variant === 'primary';
   const isDanger = variant === 'danger';
+
   return (
     <Pressable
       onPress={onPress}
@@ -889,16 +972,17 @@ function ButtonLike({
               ? '#862F2A'
               : '#9C3D37'
             : isPrimary
-            ? pressed
-              ? '#194933'
-              : '#1F563D'
-            : pressed
-              ? 'rgba(0,74,38,0.08)'
-              : '#FBF7F0',
+              ? pressed
+                ? '#194933'
+                : '#1F563D'
+              : pressed
+                ? 'rgba(0,74,38,0.08)'
+                : '#FBF7F0',
           alignItems: 'center',
           justifyContent: 'center',
         },
-      ]}>
+      ]}
+    >
       <Text style={{ fontSize: 13, fontWeight: '700', color: isPrimary || isDanger ? '#FFFFFF' : '#2F5B45' }}>
         {label}
       </Text>
