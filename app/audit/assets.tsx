@@ -1,611 +1,653 @@
 import React from 'react';
-import { router } from 'expo-router';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { SearchInput } from '@/src/components';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
 import type { Asset } from '@/src/types/models';
-import { fetchAssetsForList } from '@/src/services/assets';
-import { useWorkspace } from '@/src/state/WorkspaceProvider';
-import { getSessionCache, setSessionCache } from '@/src/state/sessionCache';
-import { resolveDepartmentNames, resolveLocationNames, resolveRoomNames } from '@/src/services/lookups';
+import { fetchAssets } from '@/src/services/assets';
+import {
+  fetchDepartments,
+  fetchLocations,
+  fetchRooms,
+  type DepartmentRecord,
+  type LocationRecord,
+  type RoomRecord,
+} from '@/src/services/referenceData';
 
-type DropdownKey = 'category' | 'criticality' | 'status' | 'area' | 'department' | 'location' | 'room';
-type FilterMode = 'search' | 'filters';
-type AssetsCache = { rows: Asset[]; offset: number; hasMore: boolean };
+type ActiveTab = 'assets' | 'locations' | 'rooms';
+
+type DropdownKey =
+  | 'assetCategory'
+  | 'assetDepartment'
+  | 'assetLocation'
+  | 'assetRoom'
+  | 'assetCondition'
+  | 'assetCriticality'
+  | 'assetStatus'
+  | 'locationDepartment'
+  | 'locationSiteZone'
+  | 'locationType'
+  | 'roomLocation'
+
+type Option = {
+  label: string;
+  value: string;
+};
 
 export default function AuditAssetListScreen() {
   const t = useTheme();
-  const { user } = useWorkspace();
-  const [assetRows, setAssetRows] = React.useState<Asset[]>([]);
-  const PAGE_SIZE = 20;
-  const [offset, setOffset] = React.useState(0);
-  const [hasMore, setHasMore] = React.useState(true);
-  const [loadingMore, setLoadingMore] = React.useState(false);
-  const [initialLoading, setInitialLoading] = React.useState(true);
-  const cacheKey = React.useMemo(() => `audit-assets-${user?.id ?? 'anon'}`, [user?.id]);
 
-  const loadAssets = React.useCallback(async (nextOffset = 0, append = false) => {
-    try {
-      const data = await fetchAssetsForList({ offset: nextOffset, limit: PAGE_SIZE });
-      setAssetRows((prev) => {
-        const nextRows = append ? [...prev, ...data] : data;
-        const computedOffset = append ? nextOffset + data.length : data.length;
-        const nextHasMore = data.length === PAGE_SIZE;
-        setOffset(computedOffset);
-        setHasMore(nextHasMore);
-        setSessionCache<AssetsCache>(cacheKey, {
-          rows: nextRows,
-          offset: computedOffset,
-          hasMore: nextHasMore,
-        });
-        return nextRows;
-      });
-    } catch (error) {
-      console.log(error);
-    } finally {
-      setInitialLoading(false);
-    }
-  }, [cacheKey]);
-
-  React.useEffect(() => {
-    const cached = getSessionCache<AssetsCache>(cacheKey);
-    if (cached) {
-      setAssetRows(cached.rows);
-      setOffset(cached.offset);
-      setHasMore(cached.hasMore);
-      setInitialLoading(false);
-      loadAssets(0, false);
-      return;
-    }
-    loadAssets();
-  }, [cacheKey, loadAssets]);
-
-  React.useEffect(() => {
-    let mounted = true;
-    if (assetRows.length === 0) return;
-    (async () => {
-      const locationIds = Array.from(new Set(assetRows.map((a) => a.location_id).filter(Boolean)));
-      const roomIds = Array.from(new Set(assetRows.map((a) => a.room_id).filter(Boolean)));
-      const deptIds = Array.from(new Set(assetRows.map((a) => a.dept_id).filter(Boolean)));
-      const [loc, room, dept] = await Promise.all([
-        resolveLocationNames(locationIds),
-        resolveRoomNames(roomIds),
-        resolveDepartmentNames(deptIds),
-      ]);
-      if (!mounted) return;
-      setLocationNameById(loc);
-      setRoomNameById(room);
-      setDepartmentNameById(dept);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [assetRows]);
-
-  const loadMoreAssets = React.useCallback(async () => {
-    if (loadingMore || !hasMore) return;
-    setLoadingMore(true);
-    await loadAssets(offset, true);
-    setLoadingMore(false);
-  }, [hasMore, loadAssets, loadingMore, offset]);
-
-  const handleScroll = React.useCallback(
-    ({ nativeEvent }: { nativeEvent: { layoutMeasurement: { height: number }; contentOffset: { y: number }; contentSize: { height: number } } }) => {
-      const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
-      const threshold = 140;
-      const nearBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - threshold;
-      if (nearBottom) {
-        loadMoreAssets();
-      }
-    },
-    [loadMoreAssets]
-  );
-
+  const [activeTab, setActiveTab] = React.useState<ActiveTab>('assets');
   const [query, setQuery] = React.useState('');
-  const [filterMode, setFilterMode] = React.useState<FilterMode>('search');
-  const [category, setCategory] = React.useState<string | undefined>(undefined);
-  const [criticality, setCriticality] = React.useState<string | undefined>(undefined);
-  const [status, setStatus] = React.useState<string | undefined>(undefined);
-  const [area, setArea] = React.useState<string | undefined>(undefined);
-  const [department, setDepartment] = React.useState<string | undefined>(undefined);
-  const [location, setLocation] = React.useState<string | undefined>(undefined);
-  const [room, setRoom] = React.useState<string | undefined>(undefined);
-  const [sortBy, setSortBy] = React.useState<'alphabetical' | 'criticalityHighLow'>('alphabetical');
-  const [wheelFieldKey, setWheelFieldKey] = React.useState<DropdownKey | null>(null);
-  const [wheelDraftValue, setWheelDraftValue] = React.useState('');
-  const [sortWheelOpen, setSortWheelOpen] = React.useState(false);
-  const [sortWheelDraftValue, setSortWheelDraftValue] = React.useState<'alphabetical' | 'criticalityHighLow'>('alphabetical');
-  const [locationNameById, setLocationNameById] = React.useState<Record<string, string>>({});
-  const [roomNameById, setRoomNameById] = React.useState<Record<string, string>>({});
-  const [departmentNameById, setDepartmentNameById] = React.useState<Record<string, string>>({});
+  const [loading, setLoading] = React.useState(true);
 
-  const categories = Array.from(new Set(assetRows.map((a) => a.category)));
-  const criticalities = ['Low', 'Medium', 'High', 'Critical'];
-  const statuses = ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'];
-  const areaOptions = ['Front of house', 'Back of house'];
-  const departments = Array.from(
-    new Set(assetRows.map((a) => departmentNameById[a.dept_id] || 'Unknown'))
-  );
-  const locations = Array.from(
-    new Set(assetRows.map((a) => locationNameById[a.location_id] || 'Unknown'))
-  );
-  const rooms = Array.from(
-    new Set(
-      assetRows
-        .filter(
-          (a) =>
-            !location ||
-            (locationNameById[a.location_id] || 'Unknown') === location
-        )
-        .map((a) => roomNameById[a.room_id] || 'Unknown')
-    )
+  const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [locations, setLocations] = React.useState<LocationRecord[]>([]);
+  const [rooms, setRooms] = React.useState<RoomRecord[]>([]);
+  const [departments, setDepartments] = React.useState<DepartmentRecord[]>([]);
+
+  const [expandedAssetId, setExpandedAssetId] = React.useState<string | null>(null);
+  const [expandedLocationId, setExpandedLocationId] = React.useState<string | null>(null);
+  const [expandedRoomId, setExpandedRoomId] = React.useState<string | null>(null);
+
+  const [assetCategory, setAssetCategory] = React.useState('');
+  const [assetDepartment, setAssetDepartment] = React.useState('');
+  const [assetLocation, setAssetLocation] = React.useState('');
+  const [assetRoom, setAssetRoom] = React.useState('');
+  const [assetCondition, setAssetCondition] = React.useState('');
+  const [assetCriticality, setAssetCriticality] = React.useState('');
+  const [assetStatus, setAssetStatus] = React.useState('');
+
+  const [locationDepartment, setLocationDepartment] = React.useState('');
+  const [locationSiteZone, setLocationSiteZone] = React.useState('');
+  const [locationType, setLocationType] = React.useState('');
+
+  const [roomLocation, setRoomLocation] = React.useState('');
+
+  const [dropdownOpen, setDropdownOpen] = React.useState<DropdownKey | null>(null);
+  const [dropdownDraftValue, setDropdownDraftValue] = React.useState('');
+
+  React.useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+
+      try {
+        const [assetRows, locationRows, roomRows, departmentRows] = await Promise.all([
+          fetchAssets({ limit: 1000 }),
+          fetchLocations(),
+          fetchRooms(),
+          fetchDepartments(),
+        ]);
+
+        setAssets(assetRows);
+        setLocations(locationRows);
+        setRooms(roomRows);
+        setDepartments(departmentRows);
+      } catch (error) {
+        console.log(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, []);
+
+  const departmentNameById = React.useMemo(
+    () => Object.fromEntries(departments.map((item) => [item.id, item.name])),
+    [departments]
   );
 
-  const statusLabel = (asset: Asset) => asset.status;
-  const activeFilterCount = [area, location, room, category, department, criticality, status].filter(Boolean).length;
-  const clearAllFilters = () => {
-    setCategory(undefined);
-    setCriticality(undefined);
-    setStatus(undefined);
-    setArea(undefined);
-    setDepartment(undefined);
-    setLocation(undefined);
-    setRoom(undefined);
+  const locationNameById = React.useMemo(
+    () => Object.fromEntries(locations.map((item) => [item.id, item.name])),
+    [locations]
+  );
+
+  const roomNameById = React.useMemo(
+    () => Object.fromEntries(rooms.map((item) => [item.id, item.name])),
+    [rooms]
+  );
+
+  const makeOptions = (values: string[]) =>
+    Array.from(new Set(values.filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ label: value, value }));
+
+  const assetLocationId = locations.find((item) => item.name === assetLocation)?.id;
+
+  const dropdownOptions: Record<DropdownKey, Option[]> = {
+    assetCategory: makeOptions(assets.map((item) => item.category)),
+    assetDepartment: makeOptions(departments.map((item) => item.name)),
+    assetLocation: makeOptions(locations.map((item) => item.name)),
+    assetRoom: makeOptions(
+      rooms
+        .filter((item) => !assetLocationId || item.locationId === assetLocationId)
+        .map((item) => item.name)
+    ),
+    assetCondition: ['Excellent', 'Good', 'Fair', 'Poor', 'Needs urgent attention'].map((value) => ({ label: value, value })),
+    assetCriticality: ['Low', 'Medium', 'High', 'Critical'].map((value) => ({ label: value, value })),
+    assetStatus: ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'].map((value) => ({ label: value, value })),
+
+    locationDepartment: makeOptions(departments.map((item) => item.name)),
+    locationSiteZone: makeOptions(locations.map((item) => item.siteZone)),
+    locationType: makeOptions(locations.map((item) => item.type)),
+
+    roomLocation: makeOptions(locations.map((item) => item.name)),
   };
 
-  const houseAreaForAsset = (asset: Asset) => {
-    const roomName = (roomNameById[asset.room_id] ?? '').toLowerCase();
-    const locationName = (locationNameById[asset.location_id] ?? '').toLowerCase();
-    const departmentName = (departmentNameById[asset.dept_id] ?? '').toLowerCase();
-
-    const isBack =
-      locationName.includes('operations') ||
-      locationName.includes('quarantine') ||
-      locationName.includes('veterinary') ||
-      roomName.includes('back service') ||
-      departmentName.includes('operations') ||
-      departmentName.includes('animal care');
-
-    return isBack ? 'Back of house' : 'Front of house';
+  const dropdownLabels: Record<DropdownKey, string> = {
+    assetCategory: 'Category',
+    assetDepartment: 'Department',
+    assetLocation: 'Location',
+    assetRoom: 'Room',
+    assetCondition: 'Condition',
+    assetCriticality: 'Criticality',
+    assetStatus: 'Status',
+    locationDepartment: 'Department',
+    locationSiteZone: 'Site zone',
+    locationType: 'Location type',
+    roomLocation: 'Location',
   };
 
-  const sortLabel = sortBy === 'alphabetical' ? 'Alphabetic (A-Z)' : 'Criticality (High-Low)';
-  const openSortSelector = () => {
-    setSortWheelDraftValue(sortBy);
-    setSortWheelOpen(true);
+  const dropdownValues: Record<DropdownKey, string> = {
+    assetCategory,
+    assetDepartment,
+    assetLocation,
+    assetRoom,
+    assetCondition,
+    assetCriticality,
+    assetStatus,
+    locationDepartment,
+    locationSiteZone,
+    locationType,
+    roomLocation,
   };
 
-  const filterFields: {
-    key: DropdownKey;
-    label: string;
-    value: string | undefined;
-    options: { value: string; label: string }[];
-    onSelect: (v?: string) => void;
-    disabled: boolean;
-  }[] = [
-    {
-      key: 'category',
-      label: 'Category',
-      value: category,
-      options: categories.map((item) => ({ value: item, label: item === 'AnimalEnclosure' ? 'Enclosures' : item })),
-      onSelect: (v?: string) => setCategory(v),
-      disabled: false,
-    },
-    {
-      key: 'criticality',
-      label: 'Criticality',
-      value: criticality,
-      options: criticalities.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => setCriticality(v),
-      disabled: false,
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      value: status,
-      options: statuses.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => setStatus(v),
-      disabled: false,
-    },
-    {
-      key: 'area',
-      label: 'Area (FOH or BOH)',
-      value: area,
-      options: areaOptions.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => setArea(v),
-      disabled: false,
-    },
-    {
-      key: 'department',
-      label: 'Department',
-      value: department,
-      options: departments.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => setDepartment(v),
-      disabled: false,
-    },
-    {
-      key: 'location',
-      label: 'Location',
-      value: location,
-      options: locations.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => {
-        setLocation(v);
-        setRoom(undefined);
-      },
-      disabled: false,
-    },
-    {
-      key: 'room',
-      label: 'Room',
-      value: room,
-      options: rooms.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => setRoom(v),
-      disabled: !location,
-    },
-  ];
+  const setDropdownValue = (key: DropdownKey, value: string) => {
+    if (key === 'assetCategory') setAssetCategory(value);
+    if (key === 'assetDepartment') setAssetDepartment(value);
+    if (key === 'assetLocation') {
+      setAssetLocation(value);
+      setAssetRoom('');
+    }
+    if (key === 'assetRoom') setAssetRoom(value);
+    if (key === 'assetCondition') setAssetCondition(value);
+    if (key === 'assetCriticality') setAssetCriticality(value);
+    if (key === 'assetStatus') setAssetStatus(value);
 
-  const renderDropdownField = (field: (typeof filterFields)[number]) => (
-    <View key={field.key} style={{ flex: 1, gap: 6, opacity: field.disabled ? 0.6 : 1 }}>
-      <Text style={[t.text.caption, { fontWeight: '700' }]}>{field.label}</Text>
-      <View style={{ gap: t.spacing.xs }}>
-        <Pressable
-          disabled={field.disabled}
-          onPress={() => {
-            setSortWheelOpen(false);
-            setWheelFieldKey(field.key);
-            setWheelDraftValue(field.value ?? '');
-          }}
-          style={({ pressed }) => [
-            {
-              minHeight: 52,
-              borderWidth: 1,
-              borderColor: t.colors.border.subtle,
-              borderRadius: t.radius.lg,
-              backgroundColor: t.colors.card.surface,
-              paddingHorizontal: t.spacing.md,
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexDirection: 'row',
-              opacity: pressed ? 0.96 : 1,
-            },
-          ]}>
-          <Text style={[t.text.body, { color: field.value ? t.colors.text.primary : t.colors.text.muted }]}>
-            {field.value ?? (field.key === 'room' && !location ? 'Select location first' : 'Select an option')}
-          </Text>
-          <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
-        </Pressable>
-      </View>
+    if (key === 'locationDepartment') setLocationDepartment(value);
+    if (key === 'locationSiteZone') setLocationSiteZone(value);
+    if (key === 'locationType') setLocationType(value);
+
+    if (key === 'roomLocation') setRoomLocation(value);
+  };
+
+  const openDropdown = (key: DropdownKey) => {
+    setDropdownOpen(key);
+    setDropdownDraftValue(dropdownValues[key]);
+  };
+
+  const clearFilters = () => {
+    setQuery('');
+    setAssetCategory('');
+    setAssetDepartment('');
+    setAssetLocation('');
+    setAssetRoom('');
+    setAssetCondition('');
+    setAssetCriticality('');
+    setAssetStatus('');
+    setLocationDepartment('');
+    setLocationSiteZone('');
+    setLocationType('');
+    setRoomLocation('');
+  };
+
+  const q = query.trim().toLowerCase();
+
+  const filteredAssets = assets
+    .filter((asset) => {
+      const locationName = locationNameById[asset.location_id] ?? '';
+      const roomName = roomNameById[asset.room_id] ?? '';
+      const departmentName = departmentNameById[asset.dept_id] ?? '';
+
+      if (assetCategory && asset.category !== assetCategory) return false;
+      if (assetDepartment && departmentName !== assetDepartment) return false;
+      if (assetLocation && locationName !== assetLocation) return false;
+      if (assetRoom && roomName !== assetRoom) return false;
+      if (assetCondition && asset.condition !== assetCondition) return false;
+      if (assetCriticality && asset.criticality !== assetCriticality) return false;
+      if (assetStatus && asset.status !== assetStatus) return false;
+
+      if (!q) return true;
+
+      return `${asset.name} ${asset.asset_code} ${asset.category} ${asset.sub_category} ${asset.description} ${asset.make_model} ${asset.serial_number} ${asset.condition} ${asset.criticality} ${asset.status} ${locationName} ${roomName} ${departmentName}`
+        .toLowerCase()
+        .includes(q);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const filteredLocations = locations
+    .filter((location) => {
+      const departmentName = departmentNameById[location.departmentId] ?? '';
+
+      if (locationDepartment && departmentName !== locationDepartment) return false;
+      if (locationSiteZone && location.siteZone !== locationSiteZone) return false;
+      if (locationType && location.type !== locationType) return false;
+
+      if (!q) return true;
+
+      return `${location.name} ${location.type} ${location.siteZone} ${departmentName} ${location.starRating} ${location.evacuationPlanStatus} ${location.socialSignificance} ${location.culturalHeritage} ${location.communityAttachment} ${location.governmentCommitment} ${location.inspectorName} ${location.assessorComments}`
+        .toLowerCase()
+        .includes(q);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const filteredRooms = rooms
+    .filter((room) => {
+      const locationName = locationNameById[room.locationId] ?? '';
+
+      if (roomLocation && locationName !== roomLocation) return false;
+
+      if (!q) return true;
+
+      return `${room.name} ${room.roomNumber} ${room.floorLevel} ${room.notes} ${locationName}`
+        .toLowerCase()
+        .includes(q);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const countLabel =
+    activeTab === 'assets'
+      ? `${filteredAssets.length} assets`
+      : activeTab === 'locations'
+        ? `${filteredLocations.length} locations`
+        : `${filteredRooms.length} rooms`;
+
+  const DetailLine = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <Text style={t.text.caption}>
+      <Text style={{ fontWeight: '700' }}>{label}: </Text>
+      {value || '—'}
+    </Text>
+  );
+
+  const DropdownField = ({ fieldKey, disabled = false }: { fieldKey: DropdownKey; disabled?: boolean }) => (
+    <View style={{ flex: 1, gap: 6, opacity: disabled ? 0.6 : 1 }}>
+      <Text style={[t.text.caption, { fontWeight: '700' }]}>{dropdownLabels[fieldKey]}</Text>
+
+      <Pressable
+        disabled={disabled}
+        onPress={() => openDropdown(fieldKey)}
+        style={({ pressed }) => [
+          {
+            minHeight: 52,
+            borderWidth: 1,
+            borderColor: t.colors.border.subtle,
+            borderRadius: t.radius.lg,
+            backgroundColor: t.colors.card.surface,
+            paddingHorizontal: t.spacing.md,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexDirection: 'row',
+            opacity: pressed ? 0.96 : 1,
+          },
+        ]}
+      >
+        <Text style={[t.text.body, { color: dropdownValues[fieldKey] ? t.colors.text.primary : t.colors.text.muted }]}>
+          {dropdownValues[fieldKey] || (disabled ? 'Select parent first' : 'Select an option')}
+        </Text>
+        <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
+      </Pressable>
     </View>
   );
-  const filterField = (key: DropdownKey) => filterFields.find((field) => field.key === key)!;
 
-  const rows = assetRows
-    .filter((a) => (filterMode === 'filters' ? (!category ? true : a.category === category) : true))
-    .filter((a) => (filterMode === 'filters' ? (!criticality ? true : a.criticality === criticality) : true))
-    .filter((a) => (filterMode === 'filters' ? (!status ? true : statusLabel(a) === status) : true))
-    .filter((a) => (filterMode === 'filters' ? (!area ? true : houseAreaForAsset(a) === area) : true))
-    .filter((a) =>
-      filterMode === 'filters'
-        ? !department ||
-          (departmentNameById[a.dept_id] || 'Unknown') === department
-        : true
-    )
-    .filter((a) =>
-      filterMode === 'filters'
-        ? !location || (locationNameById[a.location_id] || 'Unknown') === location
-        : true
-    )
-    .filter((a) =>
-      filterMode === 'filters'
-        ? !room || (roomNameById[a.room_id] || 'Unknown') === room
-        : true
-    )
-    .filter((a) => {
-      if (filterMode !== 'search') return true;
-      if (!query.trim()) return true;
-      const q = query.trim().toLowerCase();
-      const hay = `${a.name} ${a.asset_code} ${a.category} ${a.sub_category} ${locationNameById[a.location_id] ?? ''} ${roomNameById[a.room_id] ?? ''} ${departmentNameById[a.dept_id] ?? ''} ${a.criticality}`.toLowerCase();
-      return hay.includes(q);
-    })
-    .sort((a, b) => {
-      if (sortBy === 'alphabetical') return a.name.localeCompare(b.name);
-      return ['Critical', 'High', 'Medium', 'Low'].indexOf(a.criticality) - ['Critical', 'High', 'Medium', 'Low'].indexOf(b.criticality);
-    });
+  const tabButton = (key: ActiveTab, label: string) => {
+    const selected = activeTab === key;
 
-  const toneForCell = (kind: 'criticality' | 'status', value: string) => {
-    if (kind === 'criticality') {
-      if (value === 'Low') return { bg: 'rgba(30,31,28,0.10)', text: '#474B44' };
-      if (value === 'Medium') return { bg: 'rgba(82,117,151,0.16)', text: '#314F6B' };
-      if (value === 'High') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
-      return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
-    }
-    if (value === 'Active') return { bg: 'rgba(47,107,75,0.12)', text: '#1F563D' };
-    if (value === 'Under repair') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
-    return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
+    return (
+      <Pressable
+        key={key}
+        onPress={() => {
+          setActiveTab(key);
+          setQuery('');
+        }}
+        style={({ pressed }) => [
+          {
+            minHeight: 38,
+            borderRadius: 999,
+            paddingHorizontal: 14,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderColor: selected ? 'rgba(47,107,75,0.58)' : 'rgba(0,74,38,0.22)',
+            backgroundColor: selected ? '#2F6B4B' : pressed ? 'rgba(0,74,38,0.08)' : '#FBF7F0',
+          },
+        ]}
+      >
+        <Text style={{ color: selected ? '#fff' : '#2F5B45', fontWeight: '700' }}>{label}</Text>
+      </Pressable>
+    );
   };
+
+  const hasActiveFilters =
+    Boolean(query) ||
+    Boolean(assetCategory) ||
+    Boolean(assetDepartment) ||
+    Boolean(assetLocation) ||
+    Boolean(assetRoom) ||
+    Boolean(assetCondition) ||
+    Boolean(assetCriticality) ||
+    Boolean(assetStatus) ||
+    Boolean(locationDepartment) ||
+    Boolean(locationSiteZone) ||
+    Boolean(locationType) ||
+    Boolean(roomLocation)
 
   return (
     <ScreenContainer>
-      <TopBar title="Condition Report Assets" userName="Auditor" />
-      <View style={{ flex: 1 }}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.lg, paddingBottom: t.spacing.xxxl }}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-            <View>
-              <Text style={[t.text.title, { fontSize: 28, lineHeight: 34 }]}>Asset Management</Text>
-              <Text style={[t.text.caption, { marginTop: -4 }]}>
-                Source-of-truth view for registered sanctuary assets. {rows.length} loaded.
-              </Text>
-            </View>
-          </View>
-          <View style={{ marginTop: t.spacing.md, marginBottom: t.spacing.sm }}>
-            <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
-          </View>
+      <TopBar title="Asset, Location & Room Info" userName="Auditor" />
 
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingHorizontal: t.spacing.xl,
+          paddingTop: t.spacing.lg,
+          paddingBottom: t.spacing.xxxl,
+          gap: t.spacing.md,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View>
+          <Text style={[t.text.title, { fontSize: 28, lineHeight: 34 }]}>
+            Asset, Location & Room Information
+          </Text>
+          <Text style={[t.text.caption, { marginTop: -4 }]}>
+            Read-only source-of-truth view for auditors. {countLabel} shown.
+          </Text>
+        </View>
+
+        <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
+
+        <View style={{ flexDirection: 'row', gap: t.spacing.sm }}>
+          {tabButton('assets', 'Assets')}
+          {tabButton('locations', 'Locations')}
+          {tabButton('rooms', 'Rooms')}
+        </View>
+
+        <SearchInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder={
+            activeTab === 'assets'
+              ? 'Search assets by name, code, category, location or room...'
+              : activeTab === 'locations'
+                ? 'Search locations by name, type, zone, department or notes...'
+                : 'Search rooms by name, number, floor, location or notes...'
+          }
+        />
+
+        {activeTab === 'assets' ? (
           <View style={{ gap: t.spacing.md }}>
-            <View style={{ flexDirection: 'row', gap: t.spacing.sm }}>
-              <Pressable
-                onPress={() => setFilterMode('search')}
-                style={({ pressed }) => [
-                  {
-                    minHeight: 38,
-                    borderRadius: 999,
-                    paddingHorizontal: 14,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderWidth: 1,
-                    borderColor: filterMode === 'search' ? 'rgba(31,59,44,0.22)' : t.colors.border.subtle,
-                    backgroundColor:
-                      filterMode === 'search'
-                        ? t.colors.brand.forestTint
-                        : pressed
-                          ? 'rgba(30,31,28,0.04)'
-                          : t.colors.card.surface,
-                  },
-                ]}>
-                <Text
-                  style={[
-                    t.text.caption,
-                    { fontWeight: '700', color: filterMode === 'search' ? t.colors.brand.forest : t.colors.text.secondary },
-                  ]}>
-                  Search
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setFilterMode('filters')}
-                style={({ pressed }) => [
-                  {
-                    minHeight: 38,
-                    borderRadius: 999,
-                    paddingHorizontal: 14,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderWidth: 1,
-                    borderColor: filterMode === 'filters' ? 'rgba(31,59,44,0.22)' : t.colors.border.subtle,
-                    backgroundColor:
-                      filterMode === 'filters'
-                        ? t.colors.brand.forestTint
-                        : pressed
-                          ? 'rgba(30,31,28,0.04)'
-                          : t.colors.card.surface,
-                  },
-                ]}>
-                <Text
-                  style={[
-                    t.text.caption,
-                    { fontWeight: '700', color: filterMode === 'filters' ? t.colors.brand.forest : t.colors.text.secondary },
-                  ]}>
-                  Search by filters
-                </Text>
-              </Pressable>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField fieldKey="assetCategory" />
+              <DropdownField fieldKey="assetDepartment" />
             </View>
-
-            {filterMode === 'search' ? (
-              <SearchInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search asset code, name, location, room, criticality..."
-              />
-            ) : (
-              <View style={{ gap: t.spacing.md }}>
-                <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-                  {renderDropdownField(filterField('area'))}
-                  {renderDropdownField(filterField('location'))}
-                </View>
-                <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-                  {renderDropdownField(filterField('room'))}
-                  {renderDropdownField(filterField('category'))}
-                </View>
-                <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-                  {renderDropdownField(filterField('department'))}
-                  {renderDropdownField(filterField('criticality'))}
-                </View>
-                <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-                  {renderDropdownField(filterField('status'))}
-                  <View style={{ flex: 1 }} />
-                </View>
-                {!location ? <Text style={t.text.caption}>Select a location to enable room filtering.</Text> : null}
-              </View>
-            )}
-
-            {filterMode === 'filters' && activeFilterCount > 0 ? (
-              <View style={{ alignItems: 'flex-start' }}>
-                <Pressable
-                  onPress={clearAllFilters}
-                  style={({ pressed }) => [
-                    {
-                      minHeight: 40,
-                      borderWidth: 1,
-                      borderColor: 'rgba(0,74,38,0.42)',
-                      borderRadius: 999,
-                      paddingHorizontal: 16,
-                      justifyContent: 'center',
-                      backgroundColor: pressed ? 'rgba(0,74,38,0.20)' : 'rgba(0,74,38,0.14)',
-                    },
-                  ]}>
-                  <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>Reset filters</Text>
-                </Pressable>
-              </View>
-            ) : null}
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField fieldKey="assetLocation" />
+              <DropdownField fieldKey="assetRoom" disabled={!assetLocation} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField fieldKey="assetCondition" />
+              <DropdownField fieldKey="assetCriticality" />
+            </View>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField fieldKey="assetStatus" />
+              <View style={{ flex: 1 }} />
+            </View>
           </View>
+        ) : null}
 
-          <View style={{ marginVertical: t.spacing.xl }}>
-            <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
+        {activeTab === 'locations' ? (
+          <View style={{ gap: t.spacing.md }}>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField fieldKey="locationDepartment" />
+              <DropdownField fieldKey="locationSiteZone" />
+            </View>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField fieldKey="locationType" />
+              <View style={{ flex: 1 }} />
+            </View>
           </View>
+        ) : null}
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md }}>
-            <Text style={[t.text.title, { fontSize: 26, lineHeight: 32, marginBottom: t.spacing.md }]}>Asset Results</Text>
+        {activeTab === 'rooms' ? (
+          <View style={{ gap: t.spacing.md }}>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField fieldKey="roomLocation" />
+              <View style={{ flex: 1 }} />
+            </View>
+          </View>
+        ) : null}
+
+        {hasActiveFilters ? (
+          <View style={{ alignItems: 'flex-start' }}>
             <Pressable
-              onPress={openSortSelector}
-              hitSlop={8}
+              onPress={clearFilters}
               style={({ pressed }) => [
                 {
-                  minHeight: 44,
-                  minWidth: 248,
+                  minHeight: 40,
                   borderWidth: 1,
-                  borderColor: t.colors.border.subtle,
-                  borderRadius: t.radius.lg,
-                  backgroundColor: t.colors.card.surface,
-                  paddingHorizontal: t.spacing.md,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  opacity: pressed ? 0.96 : 1,
+                  borderColor: 'rgba(0,74,38,0.42)',
+                  borderRadius: 999,
+                  paddingHorizontal: 16,
+                  justifyContent: 'center',
+                  backgroundColor: pressed ? 'rgba(0,74,38,0.20)' : 'rgba(0,74,38,0.14)',
                 },
-              ]}>
-              <Text style={[t.text.body, { color: t.colors.text.primary }]}>Sort: {sortLabel}</Text>
-              <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
+              ]}
+            >
+              <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>
+                Reset filters
+              </Text>
             </Pressable>
           </View>
-          <Text style={[t.text.caption, { marginTop: -t.spacing.md, marginBottom: t.spacing.md }]}>
-            Table view for quick scanning and comparison.
-          </Text>
+        ) : null}
 
-          {initialLoading ? (
-            <View style={{ minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <ActivityIndicator size="small" color={t.colors.brand.forest} />
-              <Text style={t.text.caption}>Loading asset results...</Text>
-            </View>
-          ) : (
-            <View
-            style={{
-              borderWidth: 1,
-              borderColor: t.colors.border.subtle,
-              borderRadius: t.radius.lg,
-              overflow: 'hidden',
-              backgroundColor: t.colors.card.surface,
-            }}>
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingHorizontal: t.spacing.md,
-                paddingVertical: t.spacing.sm,
-                backgroundColor: t.colors.card.surfaceAlt,
-                borderBottomWidth: 1,
-                borderBottomColor: t.colors.border.subtle,
-              }}>
-              <Text style={[t.text.caption, { flex: 3, fontWeight: '700' }]}>Asset</Text>
-              <Text style={[t.text.caption, { flex: 2.3, fontWeight: '700' }]}>Location Context</Text>
-              <Text style={[t.text.caption, { flex: 1.1, fontWeight: '700', textAlign: 'center' }]}>Status</Text>
-              <Text style={[t.text.caption, { flex: 1.1, fontWeight: '700', textAlign: 'center' }]}>Actions</Text>
-            </View>
+        {loading ? (
+          <View style={{ minHeight: 140, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <ActivityIndicator size="small" color={t.colors.brand.forest} />
+            <Text style={t.text.caption}>Loading information...</Text>
+          </View>
+        ) : null}
 
-            {rows.map((a, idx) => {
-              const departmentName =
-                departmentNameById[a.dept_id] || 'Unknown department';
-              const locationName = locationNameById[a.location_id] || 'Location unknown';
-              const roomName = roomNameById[a.room_id] || 'Room not set';
-              const statusColors = toneForCell('status', a.status);
+        {!loading && activeTab === 'assets' ? (
+          <View style={{ gap: t.spacing.md }}>
+            {filteredAssets.length === 0 ? (
+              <Text style={t.text.caption}>No assets found.</Text>
+            ) : (
+              filteredAssets.map((asset) => {
+                const expanded = expandedAssetId === asset.id;
 
-              return (
-                <Pressable
-                  key={a.id}
-                  onPress={() => router.push((`/asset/${a.id}` as any) as any)}
-                  style={({ pressed }) => [
-                    {
-                      flexDirection: 'row',
-                      alignItems: 'center',
+                return (
+                  <View
+                    key={asset.id}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: t.colors.border.subtle,
+                      borderRadius: t.radius.lg,
+                      backgroundColor: t.colors.card.surface,
                       paddingHorizontal: t.spacing.md,
                       paddingVertical: t.spacing.md,
-                      borderBottomWidth: idx === rows.length - 1 ? 0 : 1,
-                      borderBottomColor: t.colors.border.subtle,
-                      backgroundColor: pressed ? 'rgba(31,59,44,0.04)' : 'transparent',
-                    },
-                  ]}>
-                  <View style={{ flex: 3, paddingRight: t.spacing.md }}>
-                    <Text style={[t.text.body, { fontWeight: '700', color: t.colors.brand.forest }]}>{a.name}</Text>
-                    <Text style={[t.text.caption, { marginTop: 2 }]}>
-                      {a.asset_code} · {a.category}
+                      gap: 6,
+                    }}
+                  >
+                    <Text style={[t.text.body, { fontWeight: '700' }]}>{asset.name}</Text>
+                    <Text style={t.text.caption}>
+                      {asset.asset_code} · {asset.category || 'No category'} ·{' '}
+                      {locationNameById[asset.location_id] || 'Unknown location'}
                     </Text>
-                  </View>
 
-                  <View style={{ flex: 2.3, paddingRight: t.spacing.md }}>
-                    <Text style={t.text.caption}>{departmentName}</Text>
-                    <Text style={[t.text.caption, { marginTop: 2 }]}>
-                      {locationName} · {roomName}
-                    </Text>
-                  </View>
+                    {expanded ? (
+                      <View style={{ marginTop: t.spacing.sm, borderTopWidth: 1, borderTopColor: t.colors.border.subtle, paddingTop: t.spacing.sm, gap: 4 }}>
+                        <DetailLine label="Asset ID" value={asset.id} />
+                        <DetailLine label="Asset code" value={asset.asset_code} />
+                        <DetailLine label="Name" value={asset.name} />
+                        <DetailLine label="Category" value={asset.category} />
+                        <DetailLine label="Sub category" value={asset.sub_category} />
+                        <DetailLine label="Description" value={asset.description} />
+                        <DetailLine label="Make/model" value={asset.make_model} />
+                        <DetailLine label="Serial number" value={asset.serial_number} />
+                        <DetailLine label="Condition" value={asset.condition} />
+                        <DetailLine label="Criticality" value={asset.criticality} />
+                        <DetailLine label="Status" value={asset.status} />
+                        <DetailLine label="Department" value={departmentNameById[asset.dept_id]} />
+                        <DetailLine label="Location" value={locationNameById[asset.location_id]} />
+                        <DetailLine label="Room" value={roomNameById[asset.room_id]} />
+                        <DetailLine label="Assigned to" value={asset.assigned_to} />
+                        <DetailLine label="Remaining life" value={`${asset.remaining_life_years || 0} years`} />
+                        <DetailLine label="Utilisation" value={asset.utilisation} />
+                        <DetailLine label="Compatibility of use" value={asset.compatibility_of_use} />
+                        <DetailLine label="Environmental impact" value={asset.environmental_impact} />
+                        <DetailLine label="Purchase date" value={asset.purchase_date} />
+                        <DetailLine label="Purchase cost" value={typeof asset.purchase_cost === 'number' ? `$${asset.purchase_cost.toLocaleString()}` : '—'} />
+                        <DetailLine label="Replacement cost" value={typeof asset.replacement_cost === 'number' ? `$${asset.replacement_cost.toLocaleString()}` : '—'} />
+                        <DetailLine label="Warranty expiry" value={asset.warranty_expiry} />
+                        <DetailLine label="Last serviced" value={asset.last_serviced_date} />
+                        <DetailLine label="Next service" value={asset.next_service_date} />
+                        <DetailLine label="Notes" value={asset.notes} />
+                      </View>
+                    ) : null}
 
-                  <View style={{ flex: 1.1, alignItems: 'center' }}>
-                    <View
-                      style={{
-                        borderRadius: 10,
-                        paddingHorizontal: 12,
-                        paddingVertical: 7,
-                        backgroundColor: statusColors.bg,
-                      }}>
-                      <Text style={{ color: statusColors.text, fontSize: 12, fontWeight: '700' }}>{a.status}</Text>
-                    </View>
-                  </View>
-
-                  <View style={{ flex: 1.1, alignItems: 'center', justifyContent: 'center' }}>
-                    <Pressable
-                      onPress={() => router.push((`/asset/${a.id}` as any) as any)}
-                      style={({ pressed }) => [
-                        {
-                          minHeight: 32,
-                          minWidth: 64,
-                          borderRadius: 999,
-                          borderWidth: 1,
-                          borderColor: '#2F6B4B',
-                          backgroundColor: pressed ? '#285E42' : '#2F6B4B',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        },
-                      ]}>
-                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>View</Text>
+                    <Pressable onPress={() => setExpandedAssetId((current) => (current === asset.id ? null : asset.id))}>
+                      <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700' }]}>
+                        {expanded ? 'Hide details' : 'View details'}
+                      </Text>
                     </Pressable>
                   </View>
-                </Pressable>
-              );
-            })}
+                );
+              })
+            )}
           </View>
-          )}
+        ) : null}
 
-          {hasMore ? (
-            <View style={{ marginTop: t.spacing.md, alignItems: 'center', minHeight: 36, justifyContent: 'center' }}>
-              {loadingMore ? <ActivityIndicator size="small" color={t.colors.brand.forest} /> : null}
-            </View>
-          ) : null}
-        </ScrollView>
-      </View>
-      <AppBottomNav />
+        {!loading && activeTab === 'locations' ? (
+          <View style={{ gap: t.spacing.md }}>
+            {filteredLocations.length === 0 ? (
+              <Text style={t.text.caption}>No locations found.</Text>
+            ) : (
+              filteredLocations.map((location) => {
+                const expanded = expandedLocationId === location.id;
+
+                return (
+                  <View
+                    key={location.id}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: t.colors.border.subtle,
+                      borderRadius: t.radius.lg,
+                      backgroundColor: t.colors.card.surface,
+                      paddingHorizontal: t.spacing.md,
+                      paddingVertical: t.spacing.md,
+                      gap: 6,
+                    }}
+                  >
+                    <Text style={[t.text.body, { fontWeight: '700' }]}>{location.name}</Text>
+                    <Text style={t.text.caption}>
+                      {location.type || 'Location'} · {location.siteZone || 'No zone'} ·{' '}
+                      {departmentNameById[location.departmentId] ?? 'Unknown department'}
+                    </Text>
+
+                    {expanded ? (
+                      <View style={{ marginTop: t.spacing.sm, borderTopWidth: 1, borderTopColor: t.colors.border.subtle, paddingTop: t.spacing.sm, gap: 4 }}>
+                        <DetailLine label="Location ID" value={location.id} />
+                        <DetailLine label="Name" value={location.name} />
+                        <DetailLine label="Type" value={location.type} />
+                        <DetailLine label="Site zone" value={location.siteZone} />
+                        <DetailLine label="Department" value={departmentNameById[location.departmentId]} />
+                        <DetailLine label="Department ID" value={location.departmentId} />
+                        <DetailLine label="Star rating" value={location.starRating} />
+                        <DetailLine label="Evacuation plan" value={location.evacuationPlanStatus} />
+                        <DetailLine label="Heritage listed" value={location.heritageListed ? 'Yes' : 'No'} />
+                        <DetailLine label="Iconic" value={location.iconic ? 'Yes' : 'No'} />
+                        <DetailLine label="Social significance" value={location.socialSignificance} />
+                        <DetailLine label="Cultural heritage" value={location.culturalHeritage} />
+                        <DetailLine label="Community attachment" value={location.communityAttachment} />
+                        <DetailLine label="Government commitment" value={location.governmentCommitment} />
+                        <DetailLine label="Inspection date" value={location.inspectionDate} />
+                        <DetailLine label="Inspector name" value={location.inspectorName} />
+                        <DetailLine label="Assessor comments" value={location.assessorComments} />
+                      </View>
+                    ) : null}
+
+                    <Pressable onPress={() => setExpandedLocationId((current) => (current === location.id ? null : location.id))}>
+                      <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700' }]}>
+                        {expanded ? 'Hide details' : 'View details'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        ) : null}
+
+        {!loading && activeTab === 'rooms' ? (
+          <View style={{ gap: t.spacing.md }}>
+            {filteredRooms.length === 0 ? (
+              <Text style={t.text.caption}>No rooms found.</Text>
+            ) : (
+              filteredRooms.map((room) => {
+                const expanded = expandedRoomId === room.id;
+
+                return (
+                  <View
+                    key={room.id}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: t.colors.border.subtle,
+                      borderRadius: t.radius.lg,
+                      backgroundColor: t.colors.card.surface,
+                      paddingHorizontal: t.spacing.md,
+                      paddingVertical: t.spacing.md,
+                      gap: 6,
+                    }}
+                  >
+                    <Text style={[t.text.body, { fontWeight: '700' }]}>{room.name || room.id}</Text>
+                    <Text style={t.text.caption}>
+                      {room.roomNumber || 'No room number'} · {room.floorLevel || 'No floor'} ·{' '}
+                      {locationNameById[room.locationId] ?? 'Unknown location'}
+                    </Text>
+
+                    {expanded ? (
+                      <View style={{ marginTop: t.spacing.sm, borderTopWidth: 1, borderTopColor: t.colors.border.subtle, paddingTop: t.spacing.sm, gap: 4 }}>
+                        <DetailLine label="Room ID" value={room.id} />
+                        <DetailLine label="Room name" value={room.name} />
+                        <DetailLine label="Room number" value={room.roomNumber} />
+                        <DetailLine label="Floor level" value={room.floorLevel} />
+                        <DetailLine label="Location" value={locationNameById[room.locationId]} />
+                        <DetailLine label="Location ID" value={room.locationId} />
+                        <DetailLine label="Notes" value={room.notes} />
+                      </View>
+                    ) : null}
+
+                    <Pressable onPress={() => setExpandedRoomId((current) => (current === room.id ? null : room.id))}>
+                      <Text style={[t.text.caption, { color: t.colors.brand.forest, fontWeight: '700' }]}>
+                        {expanded ? 'Hide details' : 'View details'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        ) : null}
+      </ScrollView>
 
       <Modal
-        visible={Boolean(wheelFieldKey) || sortWheelOpen}
+        visible={Boolean(dropdownOpen)}
         transparent
         animationType="fade"
-        onRequestClose={() => {
-          setWheelFieldKey(null);
-          setSortWheelOpen(false);
-        }}>
+        onRequestClose={() => setDropdownOpen(null)}
+      >
         <View
           style={{
             flex: 1,
@@ -613,14 +655,13 @@ export default function AuditAssetListScreen() {
             alignItems: 'center',
             justifyContent: 'center',
             paddingHorizontal: t.spacing.xl,
-          }}>
+          }}
+        >
           <Pressable
-            onPress={() => {
-              setWheelFieldKey(null);
-              setSortWheelOpen(false);
-            }}
+            onPress={() => setDropdownOpen(null)}
             style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
           />
+
           <View
             style={{
               width: '100%',
@@ -630,7 +671,8 @@ export default function AuditAssetListScreen() {
               borderRadius: t.radius.lg,
               backgroundColor: t.colors.card.surface,
               overflow: 'hidden',
-            }}>
+            }}
+          >
             <View
               style={{
                 minHeight: 46,
@@ -640,61 +682,44 @@ export default function AuditAssetListScreen() {
                 justifyContent: 'space-between',
                 borderBottomWidth: 1,
                 borderBottomColor: t.colors.border.subtle,
-              }}>
-              <Pressable
-                onPress={() => {
-                  setWheelFieldKey(null);
-                  setSortWheelOpen(false);
-                }}>
+              }}
+            >
+              <Pressable onPress={() => setDropdownOpen(null)}>
                 <Text style={{ color: t.colors.text.muted, fontWeight: '700' }}>Cancel</Text>
               </Pressable>
+
               <Text style={[t.text.caption, { fontWeight: '700' }]}>
-                {sortWheelOpen
-                  ? 'Sort assets'
-                  : filterFields.find((field) => field.key === wheelFieldKey)?.label ?? 'Select an option'}
+                {dropdownOpen ? dropdownLabels[dropdownOpen] : 'Select option'}
               </Text>
+
               <Pressable
                 onPress={() => {
-                  if (sortWheelOpen) {
-                    setSortBy(sortWheelDraftValue);
-                    setSortWheelOpen(false);
-                    return;
-                  }
-                  const activeField = filterFields.find((field) => field.key === wheelFieldKey);
-                  activeField?.onSelect(wheelDraftValue ? wheelDraftValue : undefined);
-                  setWheelFieldKey(null);
-                }}>
+                  if (dropdownOpen) setDropdownValue(dropdownOpen, dropdownDraftValue);
+                  setDropdownOpen(null);
+                }}
+              >
                 <Text style={{ color: t.colors.brand.forest, fontWeight: '700' }}>Done</Text>
               </Pressable>
             </View>
-            {sortWheelOpen ? (
-              <Picker
-                selectedValue={sortWheelDraftValue}
-                onValueChange={(value) => setSortWheelDraftValue(value as 'alphabetical' | 'criticalityHighLow')}
-                style={{ height: 230 }}
-                itemStyle={{ fontSize: 18 }}>
-                <Picker.Item label="Sort alphabetic (A-Z)" value="alphabetical" />
-                <Picker.Item label="Criticality (High-Low)" value="criticalityHighLow" />
-              </Picker>
-            ) : (
-              <Picker
-                selectedValue={wheelDraftValue}
-                onValueChange={(value) => setWheelDraftValue(String(value))}
-                style={{ height: 230 }}
-                itemStyle={{ fontSize: 18 }}>
-                <Picker.Item
-                  label={wheelFieldKey === 'room' && !location ? 'Select location first' : 'Select an option'}
-                  value=""
-                />
-                {(filterFields.find((field) => field.key === wheelFieldKey)?.options ?? []).map((option) => (
-                  <Picker.Item key={option.value} label={option.label} value={option.value} />
-                ))}
-              </Picker>
-            )}
+
+            <Picker
+              selectedValue={dropdownDraftValue}
+              onValueChange={(value) => setDropdownDraftValue(String(value))}
+              style={{ height: 230 }}
+              itemStyle={{ fontSize: 18 }}
+            >
+              <Picker.Item label="All" value="" />
+              {dropdownOpen
+                ? dropdownOptions[dropdownOpen].map((option) => (
+                    <Picker.Item key={option.value} label={option.label} value={option.value} />
+                  ))
+                : null}
+            </Picker>
           </View>
         </View>
       </Modal>
+
+      <AppBottomNav />
     </ScreenContainer>
   );
 }
-
