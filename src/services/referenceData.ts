@@ -181,3 +181,53 @@ export async function deleteLocation(id: string): Promise<void> {
   const { error } = await supabase.from('location').delete().eq('location_id', id);
   if (error) throw error;
 }
+
+export async function createRoom(payload: {
+  name?: string;
+  locationId: string;
+  roomNumber?: string;
+  floorLevel?: string;
+  notes?: string;
+}) {
+  const { error } = await supabase.from('room').insert([
+    {
+      room_name: payload.name?.trim() || null,
+      location_id: payload.locationId,
+      room_number: payload.roomNumber?.trim() || null,
+      floor_level: payload.floorLevel ? Number(payload.floorLevel) : null,
+      notes: payload.notes?.trim() || null,
+    },
+  ]);
+
+  if (error) throw error;
+}
+
+export async function updateRoom(
+  id: string,
+  payload: {
+    name?: string;
+    locationId?: string;
+    roomNumber?: string;
+    floorLevel?: string;
+    notes?: string;
+  }
+) {
+  const { error } = await supabase
+    .from('room')
+    .update({
+      room_name: payload.name?.trim() || null,
+      location_id: payload.locationId,
+      room_number: payload.roomNumber?.trim() || null,
+      floor_level: payload.floorLevel ? Number(payload.floorLevel) : null,
+      notes: payload.notes?.trim() || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('room_id', id);
+
+  if (error) throw error;
+}
+
+export async function deleteRoom(id: string) {
+  const { error } = await supabase.from('room').delete().eq('room_id', id);
+  if (error) throw error;
+}
