@@ -145,6 +145,7 @@ export default function AdminUsersPage() {
   const [savingRoom, setSavingRoom] = React.useState(false);
   const [deletingRoom, setDeletingRoom] = React.useState(false);
 
+  const [userQuery, setUserQuery] = React.useState('');
   const [showAddUserModal, setShowAddUserModal] = React.useState(false);
   const [newUserEmail, setNewUserEmail] = React.useState('');
   const [newUserRole, setNewUserRole] = React.useState<'Admin' | 'Auditor'>('Auditor');
@@ -532,6 +533,18 @@ export default function AdminUsersPage() {
     Boolean(locationTypeFilter) ||
     Boolean(roomLocationFilter);
 
+  const filteredUsers = users
+    .filter((user) => {
+      if (!userQuery.trim()) return true;
+
+      const q = userQuery.toLowerCase();
+
+      return `${user.name} ${user.email} ${user.role}`
+        .toLowerCase()
+        .includes(q);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const filteredLocations = locations
     .filter((location) => {
       const department = departmentNamesById[location.departmentId] ?? '';
@@ -694,6 +707,12 @@ export default function AdminUsersPage() {
               </Pressable>
             </View>
 
+            <SearchInput
+              value={userQuery}
+              onChangeText={setUserQuery}
+              placeholder="Search users by name, email or role..."
+            />
+
             {loadingUsers ? (
               <View style={{ minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <ActivityIndicator size="small" color={t.colors.brand.forest} />
@@ -701,10 +720,10 @@ export default function AdminUsersPage() {
               </View>
             ) : null}
 
-            {!loadingUsers && users.length === 0 ? (
+            {!loadingUsers && filteredUsers.length === 0 ? (
               <Text style={t.text.caption}>No users found yet.</Text>
             ) : !loadingUsers ? (
-              users.map((user) => {
+              filteredUsers.map((user) => {
                 const isSelf = signedInUser?.id === user.id;
 
                 return (
