@@ -18,9 +18,10 @@ export default function AdminSettingsPage() {
   const { user } = useWorkspace();
   const [settings, setSettings] = React.useState<AdminSettings>(defaultAdminSettings);
   const [saved, setSaved] = React.useState<AdminSettings>(defaultAdminSettings);
-  const [message, setMessage] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<{ text: string; tone: 'success' | 'error' } | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [loadingSettings, setLoadingSettings] = React.useState(true);
+  const allowLeaveRef = React.useRef(false);
   const dirty = JSON.stringify(settings) !== JSON.stringify(saved);
 
   React.useEffect(() => {
@@ -34,32 +35,43 @@ export default function AdminSettingsPage() {
 
   const saveNow = React.useCallback(async () => {
     if (!user?.id) {
-      setMessage('Please sign in again.');
+      setMessage({ text: 'Please sign in again.', tone: 'error' });
       return false;
     }
     setSaving(true);
     const result = await saveAdminSettings(user.id, settings);
     setSaving(false);
     if (!result.ok) {
-      setMessage(result.error);
+      setMessage({ text: result.error, tone: 'error' });
       return false;
     }
     setSaved(settings);
-    setMessage('Settings saved.');
+    setMessage({ text: 'Settings saved.', tone: 'success' });
     return true;
   }, [settings, user?.id]);
 
   React.useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (e: any) => {
-      if (!dirty) return;
+      if (!dirty || allowLeaveRef.current) return;
       e.preventDefault();
       Alert.alert('Unsaved changes', 'You need to save your changes before leaving this page.', [
         { text: 'Keep editing', style: 'cancel' },
         {
+          text: 'Discard changes',
+          style: 'destructive',
+          onPress: () => {
+            allowLeaveRef.current = true;
+            navigation.dispatch(e.data.action);
+          },
+        },
+        {
           text: 'Save now',
           onPress: async () => {
             const ok = await saveNow();
-            if (ok) navigation.dispatch(e.data.action);
+            if (ok) {
+              allowLeaveRef.current = true;
+              navigation.dispatch(e.data.action);
+            }
           },
         },
       ]);
@@ -134,17 +146,6 @@ export default function AdminSettingsPage() {
             </View>
 
             <ChoiceRow
-              title="Default admin section"
-              options={[
-                { label: 'Users', value: 'users' },
-                { label: 'Locations', value: 'locations' },
-                { label: 'Reports', value: 'reports' },
-                { label: 'Assets', value: 'assets' },
-              ]}
-              value={settings.defaultAdminSection}
-              onChange={(value) => setSettings((prev) => ({ ...prev, defaultAdminSection: value as any }))}
-            />
-            <ChoiceRow
               title="Reminder frequency"
               options={[
                 { label: 'Off', value: 'off' },
@@ -168,7 +169,7 @@ export default function AdminSettingsPage() {
                   if (removable.length > 0) {
                     await AsyncStorage.multiRemove(removable);
                   }
-                  setMessage('Cached offline data cleared.');
+                  setMessage({ text: 'Cached offline data cleared.', tone: 'success' });
                 }}
                 style={({ pressed }) => [
                   {
@@ -204,7 +205,11 @@ export default function AdminSettingsPage() {
               </Pressable>
             </View>
 
-            {message ? <Text style={[t.text.caption, { color: '#2F5B45' }]}>{message}</Text> : null}
+            {message ? (
+              <Text style={[t.text.caption, { color: message.tone === 'error' ? '#B63E34' : '#2F5B45' }]}>
+                {message.text}
+              </Text>
+            ) : null}
             {dirty ? <Text style={[t.text.caption, { color: '#B63E34' }]}>You have unsaved changes.</Text> : null}
           </>
         )}
@@ -228,7 +233,13 @@ function ToggleRow({
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
       <Text style={t.text.bodyMuted}>{label}</Text>
-      <Switch value={value} onValueChange={onValueChange} trackColor={trackColor} thumbColor="#F8F7F3" />
+      <Switch
+        accessibilityLabel={label}
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={trackColor}
+        thumbColor="#F8F7F3"
+      />
     </View>
   );
 }
@@ -274,4 +285,3 @@ function ChoiceRow({
     </View>
   );
 }
-
