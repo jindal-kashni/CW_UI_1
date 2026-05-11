@@ -4,7 +4,7 @@ import { usePathname, router } from 'expo-router';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/src/theme';
-import { getAuditorSettingsDirty } from '@/src/state/auditorSettingsDraftGuard';
+import { getAuditorSettingsDirty, setAuditorSettingsDirty } from '@/src/state/auditorSettingsDraftGuard';
 
 /** Auditor workspace tab bar only (separate from admin app). */
 const AUDITOR_BASE = '/audit' as const;
@@ -36,6 +36,7 @@ export function AppBottomNav() {
   const t = useTheme();
   const pathname = usePathname();
   const [showUnsavedModal, setShowUnsavedModal] = React.useState(false);
+  const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   const navItems = items;
   const headerGreen = '#004A26';
   const navBg = '#F7F6F2';
@@ -67,6 +68,7 @@ export function AppBottomNav() {
                 onPress={() => {
                   const leavingAuditSettings = pathname === '/audit/settings' && item.href !== '/audit/settings';
                   if (leavingAuditSettings && getAuditorSettingsDirty()) {
+                    setPendingHref(item.href);
                     setShowUnsavedModal(true);
                     return;
                   }
@@ -136,26 +138,52 @@ export function AppBottomNav() {
             }}>
             <Text style={[t.text.title, { fontSize: 18, lineHeight: 24 }]}>Unsaved changes</Text>
             <Text style={t.text.bodyMuted}>You need to save your changes before leaving this page.</Text>
-            <Pressable
-              onPress={() => setShowUnsavedModal(false)}
-              style={({ pressed }) => [
-                {
-                  marginTop: t.spacing.xs,
-                  minHeight: 42,
-                  borderRadius: t.radius.lg,
-                  borderWidth: 1,
-                  borderColor: '#2F6B4B',
-                  backgroundColor: pressed ? '#285E42' : '#2F6B4B',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                },
-              ]}>
-              <Text style={{ color: '#fff', fontWeight: '700' }}>OK</Text>
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: t.spacing.sm }}>
+              <Pressable
+                onPress={() => {
+                  setShowUnsavedModal(false);
+                  setPendingHref(null);
+                }}
+                style={({ pressed }) => [
+                  {
+                    flex: 1,
+                    minHeight: 42,
+                    borderRadius: t.radius.lg,
+                    borderWidth: 1,
+                    borderColor: 'rgba(0,74,38,0.22)',
+                    backgroundColor: pressed ? 'rgba(0,74,38,0.08)' : '#F4F1EA',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  },
+                ]}>
+                <Text style={{ color: '#2F5B45', fontWeight: '700' }}>Keep editing</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  const href = pendingHref;
+                  setAuditorSettingsDirty(false);
+                  setShowUnsavedModal(false);
+                  setPendingHref(null);
+                  if (href) router.replace(href as any);
+                }}
+                style={({ pressed }) => [
+                  {
+                    flex: 1,
+                    minHeight: 42,
+                    borderRadius: t.radius.lg,
+                    borderWidth: 1,
+                    borderColor: '#B63E34',
+                    backgroundColor: pressed ? '#9F342C' : '#B63E34',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  },
+                ]}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Discard changes</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
     </SafeAreaView>
   );
 }
-

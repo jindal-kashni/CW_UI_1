@@ -16,7 +16,6 @@ export type AdminSettings = {
   pushNotifications: boolean;
   autoSyncOnline: boolean;
   syncWifiOnly: boolean;
-  defaultAdminSection: 'users' | 'locations' | 'reports' | 'assets';
   reminderFrequency: 'off' | 'daily' | 'every_2_days';
   dueUrgencyIndicators: boolean;
   largeTouchTargets: boolean;
@@ -38,7 +37,6 @@ const ADMIN_DEFAULTS: AdminSettings = {
   pushNotifications: false,
   autoSyncOnline: true,
   syncWifiOnly: true,
-  defaultAdminSection: 'users',
   reminderFrequency: 'daily',
   dueUrgencyIndicators: true,
   largeTouchTargets: false,
@@ -168,12 +166,6 @@ function mapAdminRow(row: SettingsRow | null): AdminSettings {
     pushNotifications: Boolean(row.push_notifications),
     autoSyncOnline: row.auto_sync_online ?? ADMIN_DEFAULTS.autoSyncOnline,
     syncWifiOnly: row.sync_wifi_only ?? ADMIN_DEFAULTS.syncWifiOnly,
-    // Reuse existing persisted enum field for admin landing section.
-    defaultAdminSection: safeEnum(
-      row.default_reports_tab,
-      ['users', 'locations', 'reports', 'assets'],
-      ADMIN_DEFAULTS.defaultAdminSection
-    ),
     reminderFrequency: safeEnum(
       row.reminder_frequency,
       ['off', 'daily', 'every_2_days'],
@@ -214,8 +206,6 @@ export async function saveAdminSettings(
           push_notifications: settings.pushNotifications,
           auto_sync_online: settings.autoSyncOnline,
           sync_wifi_only: settings.syncWifiOnly,
-          // Keep auditor-specific view untouched for admins.
-          default_reports_tab: settings.defaultAdminSection,
           reminder_frequency: settings.reminderFrequency,
           due_urgency_indicators: settings.dueUrgencyIndicators,
           large_touch_targets: settings.largeTouchTargets,
