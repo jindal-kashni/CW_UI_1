@@ -3,9 +3,9 @@ import { router } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { ActivityIndicator, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+
 import { SearchInput } from '@/src/components';
 import { AdminScreenScaffold } from '@/src/layout';
-import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import type { Asset } from '@/src/types/models';
 import { deleteAsset, fetchAssets, searchAssets } from '@/src/services/assets';
@@ -21,19 +21,202 @@ import {
 
 type DropdownKey =
   | 'category'
-  | 'condition'
+  | 'subCategory'
   | 'criticality'
   | 'status'
-  | 'area'
+  | 'fohBoh'
+  | 'inspectionFrequency'
   | 'department'
   | 'location'
   | 'room';
 
 type FilterMode = 'search' | 'filters';
+type SortMode = 'alphabetical' | 'criticalityHighLow' | 'status';
+
+const ASSET_CATEGORIES = [
+  'Electrical Equipment',
+  'HVAC / Refrigeration',
+  'Vehicles & Mobile Machinery',
+  'Furniture & External Fixtures',
+  'WHS & Safety Equipment',
+  'Interior Infrastructure',
+  'Exterior Infrastructure',
+  'Playground Assets',
+  'Grounds & Maintenance Equipment',
+  'Other / Miscellaneous',
+];
+
+const SUB_CATEGORY_OPTIONS: Record<string, string[]> = {
+  'Electrical Equipment': [
+    'Appliance',
+    'Kitchen Equipment',
+    'Workshop Equipment',
+    'Pump',
+    'Motor',
+    'Generator',
+    'Lighting Equipment',
+    'Battery System',
+    'Charging Station',
+    'Electrical Cabinet',
+    'Switchboard',
+    'Portable Equipment',
+    'Other Electrical',
+  ],
+
+  'HVAC / Refrigeration': [
+    'Air Conditioner',
+    'Split System',
+    'Ducted System',
+    'Exhaust Fan',
+    'Ventilation System',
+    'Freezer',
+    'Fridge',
+    'Cool Room',
+    'Compressor',
+    'Dehumidifier',
+    'Other HVAC',
+  ],
+
+  'Vehicles & Mobile Machinery': [
+    'Car',
+    'Truck',
+    'Buggy',
+    'Forklift',
+    'Trailer',
+    'Ride-on Mower',
+    'Excavator',
+    'Scissor Lift',
+    'Mobile Plant',
+    'Other Vehicle',
+  ],
+
+  'Furniture & External Fixtures': [
+    'Bench',
+    'Outdoor Table',
+    'Bin',
+    'Shade Umbrella',
+    'Picnic Setting',
+    'Display Unit',
+    'Barrier',
+    'Queue Rail',
+    'Storage Cabinet',
+    'Shelving',
+    'External Seating',
+    'Other Fixture',
+  ],
+
+  'WHS & Safety Equipment': [
+    'Fire Extinguisher',
+    'Fire Blanket',
+    'First Aid Kit',
+    'Spill Kit',
+    'Emergency Lighting',
+    'Exit Sign',
+    'Smoke Detector',
+    'Eyewash Station',
+    'PPE Station',
+    'Safety Barrier',
+    'Defibrillator',
+    'Other WHS',
+  ],
+
+  'Interior Infrastructure': [
+    'Paint',
+    'Flooring',
+    'Ceiling',
+    'Internal Wall',
+    'Lighting',
+    'Plumbing Fixture',
+    'Door',
+    'Window',
+    'Cabinetry',
+    'Tiling',
+    'Internal Signage',
+    'Handrail',
+    'Partition',
+    'Other Interior',
+  ],
+
+  'Exterior Infrastructure': [
+    'Roof',
+    'Gutter',
+    'External Wall',
+    'Fence',
+    'Gate',
+    'Pathway',
+    'Decking',
+    'Drainage',
+    'Outdoor Signage',
+    'Shade Structure',
+    'Retaining Wall',
+    'Kerbing',
+    'Stairs',
+    'Ramp',
+    'Bridge',
+    'Other Exterior',
+  ],
+
+  'Playground Assets': [
+    'Play Structure',
+    'Swing',
+    'Slide',
+    'Climbing Equipment',
+    'Soft Fall Surface',
+    'Shade Sail',
+    'Playground Fence',
+    'Playground Gate',
+    'Playground Signage',
+    'Interactive Equipment',
+    'Other Playground',
+  ],
+
+  'Grounds & Maintenance Equipment': [
+    'Power Tool',
+    'Garden Tool',
+    'Lawn Equipment',
+    'Chainsaw',
+    'Leaf Blower',
+    'Whipper Snipper',
+    'Maintenance Cart',
+    'Pressure Cleaner',
+    'Pump Equipment',
+    'Cleaning Equipment',
+    'Workshop Tool',
+    'Other Grounds Equipment',
+  ],
+
+  'Other / Miscellaneous': [
+    'Miscellaneous',
+    'Temporary Asset',
+    'Unclassified',
+    'Specialty Item',
+    'Other',
+  ],
+};
+
+const CRITICALITIES = ['Low', 'Medium', 'High', 'Critical'];
+const STATUSES = ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'];
+const FOH_BOH_OPTIONS = ['FOH', 'BOH', 'Mixed'];
+const INSPECTION_FREQUENCIES = [
+  'Monthly',
+  'Quarterly',
+  '6-monthly',
+  'Annually',
+  'Every 2 years',
+  'Every 3 years',
+  'Every 5 years',
+  'As required',
+];
+
+const CRITICALITY_ORDER: Record<string, number> = {
+  Critical: 4,
+  High: 3,
+  Medium: 2,
+  Low: 1,
+};
 
 export default function AdminAssetsPage() {
   const t = useTheme();
-  const { assignments } = useDemoState();
 
   const [assetRows, setAssetRows] = React.useState<Asset[]>([]);
   const PAGE_SIZE = 600;
@@ -51,29 +234,28 @@ export default function AdminAssetsPage() {
 
   const [query, setQuery] = React.useState('');
   const [filterMode, setFilterMode] = React.useState<FilterMode>('search');
+
   const [category, setCategory] = React.useState<string | undefined>(undefined);
-  const [condition, setCondition] = React.useState<string | undefined>(undefined);
+  const [subCategory, setSubCategory] = React.useState<string | undefined>(undefined);
   const [criticality, setCriticality] = React.useState<string | undefined>(undefined);
   const [status, setStatus] = React.useState<string | undefined>(undefined);
-  const [area, setArea] = React.useState<string | undefined>(undefined);
+  const [fohBoh, setFohBoh] = React.useState<string | undefined>(undefined);
+  const [inspectionFrequency, setInspectionFrequency] = React.useState<string | undefined>(undefined);
   const [department, setDepartment] = React.useState<string | undefined>(undefined);
   const [location, setLocation] = React.useState<string | undefined>(undefined);
   const [room, setRoom] = React.useState<string | undefined>(undefined);
 
-  const [sortBy, setSortBy] = React.useState<'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow'>(
-    'alphabetical'
-  );
+  const [sortBy, setSortBy] = React.useState<SortMode>('alphabetical');
 
   const [wheelFieldKey, setWheelFieldKey] = React.useState<DropdownKey | null>(null);
   const [wheelDraftValue, setWheelDraftValue] = React.useState('');
   const [sortWheelOpen, setSortWheelOpen] = React.useState(false);
-  const [sortWheelDraftValue, setSortWheelDraftValue] = React.useState<
-    'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow'
-  >('alphabetical');
+  const [sortWheelDraftValue, setSortWheelDraftValue] = React.useState<SortMode>('alphabetical');
 
   const [assetPendingDelete, setAssetPendingDelete] = React.useState<Asset | null>(null);
   const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
   const [deleteNameInput, setDeleteNameInput] = React.useState('');
+
   const [searchResults, setSearchResults] = React.useState<Asset[]>([]);
   const [loadingSearch, setLoadingSearch] = React.useState(false);
 
@@ -102,36 +284,53 @@ export default function AdminAssetsPage() {
   }, []);
 
   React.useEffect(() => {
-  const timeout = setTimeout(async () => {
-    setLoadingSearch(true);
+    const timeout = setTimeout(async () => {
+      setLoadingSearch(true);
 
-    try {
-      const results = await searchAssets({
-        query,
-        category,
-        condition,
-        criticality,
-        status,
-        dept_id: allDepartments.find(d => d.name === department)?.id,
-        location_id: allLocations.find(l => l.name === location)?.id,
-        room_id: allRooms.find(r => r.name === room)?.id,
-      });
+      try {
+        const results = await searchAssets({
+          query,
+          category,
+          sub_category: subCategory,
+          criticality,
+          status,
+          foh_boh: fohBoh,
+          inspection_frequency: inspectionFrequency,
+          dept_id: allDepartments.find((d) => d.name === department)?.id,
+          location_id: allLocations.find((l) => l.name === location)?.id,
+          room_id: allRooms.find((r) => r.name === room)?.id,
+        });
 
-      setSearchResults(results);
-    } catch (err) {
-      console.log(err);
-    } finally {
-      setLoadingSearch(false);
-    }
-  }, 300); // debounce
+        setSearchResults(results);
+      } catch (err) {
+        console.log(err);
+      } finally {
+        setLoadingSearch(false);
+      }
+    }, 300);
 
-  return () => clearTimeout(timeout);
-}, [query, category, condition, criticality, status, department, location, room]);
+    return () => clearTimeout(timeout);
+  }, [
+    query,
+    category,
+    subCategory,
+    criticality,
+    status,
+    fohBoh,
+    inspectionFrequency,
+    department,
+    location,
+    room,
+    allDepartments,
+    allLocations,
+    allRooms,
+  ]);
 
   const loadAssets = async (nextOffset = 0, append = false) => {
     try {
       const data = await fetchAssets({ offset: nextOffset, limit: PAGE_SIZE });
       setAssetRows((prev) => (append ? [...prev, ...data] : data));
+      setSearchResults((prev) => (append ? [...prev, ...data] : data));
       setOffset(nextOffset + data.length);
       setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
@@ -141,11 +340,12 @@ export default function AdminAssetsPage() {
 
   React.useEffect(() => {
     (async () => {
-      if (assetRows.length === 0) return;
+      const sourceRows = searchResults.length > 0 ? searchResults : assetRows;
+      if (sourceRows.length === 0) return;
 
-      const departmentIds = assetRows.map((row) => row.dept_id).filter((id): id is string => Boolean(id));
-      const locationIds = assetRows.map((row) => row.location_id).filter((id): id is string => Boolean(id));
-      const roomIds = assetRows.map((row) => row.room_id).filter((id): id is string => Boolean(id));
+      const departmentIds = sourceRows.map((row) => row.dept_id).filter((id): id is string => Boolean(id));
+      const locationIds = sourceRows.map((row) => row.location_id).filter((id): id is string => Boolean(id));
+      const roomIds = sourceRows.map((row) => row.room_id).filter((id): id is string => Boolean(id));
 
       const [departmentMap, locationMap, roomMap] = await Promise.all([
         resolveDepartmentNames(departmentIds),
@@ -157,7 +357,7 @@ export default function AdminAssetsPage() {
       setLocationNamesById(locationMap);
       setRoomNamesById(roomMap);
     })();
-  }, [assetRows]);
+  }, [assetRows, searchResults]);
 
   const loadMoreAssets = async () => {
     if (loadingMore || !hasMore) return;
@@ -184,18 +384,20 @@ export default function AdminAssetsPage() {
     [loadMoreAssets]
   );
 
-  const departmentName = (asset: Asset) => departmentNamesById[asset.dept_id] || 'Unknown';
-  const locationName = (asset: Asset) => locationNamesById[asset.location_id] || 'Unknown';
-  const roomName = (asset: Asset) => roomNamesById[asset.room_id] || 'Unknown';
+  const departmentName = (asset: Asset) =>
+    (asset.dept_id ? departmentNamesById[asset.dept_id] : undefined) || 'Unknown department';
 
-  const categories = Array.from(new Set(assetRows.map((a) => a.category).filter(Boolean))).sort((a, b) =>
-    a.localeCompare(b)
-  );
+  const locationName = (asset: Asset) =>
+    (asset.location_id ? locationNamesById[asset.location_id] : undefined) || 'Location unknown';
 
-  const conditions = ['Excellent', 'Good', 'Fair', 'Poor', 'Needs urgent attention'];
-  const criticalities = ['Low', 'Medium', 'High', 'Critical'];
-  const statuses = ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'];
-  const areaOptions = ['Back of house', 'Front of house'];
+  const roomName = (asset: Asset) =>
+    (asset.room_id ? roomNamesById[asset.room_id] : undefined) || 'Room not set';
+
+  const selectedLocationId = allLocations.find((item) => item.name === location)?.id;
+
+const subCategories = category
+  ? SUB_CATEGORY_OPTIONS[category] ?? []
+  : [];
 
   const departments = allDepartments
     .map((item) => item.name)
@@ -207,53 +409,42 @@ export default function AdminAssetsPage() {
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
 
-  const selectedLocationId = allLocations.find((item) => item.name === location)?.id;
-
   const rooms = allRooms
     .filter((item) => !selectedLocationId || item.locationId === selectedLocationId)
     .map((item) => item.name)
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
 
-  const statusLabel = (asset: Asset) => asset.status;
-
-  const activeFilterCount = [area, location, room, category, department, condition, criticality, status].filter(
-    Boolean
-  ).length;
+  const activeFilterCount = [
+    category,
+    subCategory,
+    criticality,
+    status,
+    fohBoh,
+    inspectionFrequency,
+    department,
+    location,
+    room,
+  ].filter(Boolean).length;
 
   const clearAllFilters = () => {
     setCategory(undefined);
-    setCondition(undefined);
+    setSubCategory(undefined);
     setCriticality(undefined);
     setStatus(undefined);
-    setArea(undefined);
+    setFohBoh(undefined);
+    setInspectionFrequency(undefined);
     setDepartment(undefined);
     setLocation(undefined);
     setRoom(undefined);
   };
 
-  const houseAreaForAsset = (asset: Asset) => {
-    const room = roomName(asset).toLowerCase();
-    const locName = locationName(asset).toLowerCase();
-    const deptName = departmentName(asset).toLowerCase();
-
-    const isBack =
-      locName.includes('operations') ||
-      locName.includes('quarantine') ||
-      locName.includes('veterinary') ||
-      room.includes('back service') ||
-      deptName.includes('operations') ||
-      deptName.includes('animal care');
-
-    return isBack ? 'Back of house' : 'Front of house';
-  };
-
   const sortLabel =
     sortBy === 'alphabetical'
       ? 'Alphabetic (A-Z)'
-      : sortBy === 'conditionLowHigh'
-        ? 'Condition (Low-High)'
-        : 'Criticality (High-Low)';
+      : sortBy === 'criticalityHighLow'
+        ? 'Criticality (High-Low)'
+        : 'Status';
 
   const openSortSelector = () => {
     setSortWheelDraftValue(sortBy);
@@ -272,26 +463,26 @@ export default function AdminAssetsPage() {
       key: 'category',
       label: 'Category',
       value: category,
-      options: categories.map((item) => ({
-        value: item,
-        label: item === 'AnimalEnclosure' ? 'Enclosures' : item,
-      })),
-      onSelect: (v?: string) => setCategory(v),
+      options: ASSET_CATEGORIES.map((item) => ({ value: item, label: item })),
+      onSelect: (v?: string) => {
+        setCategory(v);
+        setSubCategory(undefined);
+      },
       disabled: false,
     },
     {
-      key: 'condition',
-      label: 'Condition',
-      value: condition,
-      options: conditions.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => setCondition(v),
-      disabled: false,
+      key: 'subCategory',
+      label: 'Sub-category',
+      value: subCategory,
+      options: subCategories.map((item) => ({ value: item, label: item })),
+      onSelect: (v?: string) => setSubCategory(v),
+      disabled: !category,
     },
     {
       key: 'criticality',
       label: 'Criticality',
       value: criticality,
-      options: criticalities.map((item) => ({ value: item, label: item })),
+      options: CRITICALITIES.map((item) => ({ value: item, label: item })),
       onSelect: (v?: string) => setCriticality(v),
       disabled: false,
     },
@@ -299,16 +490,24 @@ export default function AdminAssetsPage() {
       key: 'status',
       label: 'Status',
       value: status,
-      options: statuses.map((item) => ({ value: item, label: item })),
+      options: STATUSES.map((item) => ({ value: item, label: item })),
       onSelect: (v?: string) => setStatus(v),
       disabled: false,
     },
     {
-      key: 'area',
-      label: 'Area (FOH or BOH)',
-      value: area,
-      options: areaOptions.map((item) => ({ value: item, label: item })),
-      onSelect: (v?: string) => setArea(v),
+      key: 'fohBoh',
+      label: 'FOH / BOH',
+      value: fohBoh,
+      options: FOH_BOH_OPTIONS.map((item) => ({ value: item, label: item })),
+      onSelect: (v?: string) => setFohBoh(v),
+      disabled: false,
+    },
+    {
+      key: 'inspectionFrequency',
+      label: 'Inspection frequency',
+      value: inspectionFrequency,
+      options: INSPECTION_FREQUENCIES.map((item) => ({ value: item, label: item })),
+      onSelect: (v?: string) => setInspectionFrequency(v),
       disabled: false,
     },
     {
@@ -343,60 +542,77 @@ export default function AdminAssetsPage() {
   const renderDropdownField = (field: (typeof filterFields)[number]) => (
     <View key={field.key} style={{ flex: 1, gap: 6, opacity: field.disabled ? 0.6 : 1 }}>
       <Text style={[t.text.caption, { fontWeight: '700' }]}>{field.label}</Text>
-      <View style={{ gap: t.spacing.xs }}>
-        <Pressable
-          disabled={field.disabled}
-          onPress={() => {
-            setSortWheelOpen(false);
-            setWheelFieldKey(field.key);
-            setWheelDraftValue(field.value ?? '');
-          }}
-          style={({ pressed }) => [
-            {
-              minHeight: 52,
-              borderWidth: 1,
-              borderColor: t.colors.border.subtle,
-              borderRadius: t.radius.lg,
-              backgroundColor: t.colors.card.surface,
-              paddingHorizontal: t.spacing.md,
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexDirection: 'row',
-              opacity: pressed ? 0.96 : 1,
-            },
-          ]}
-        >
-          <Text style={[t.text.body, { color: field.value ? t.colors.text.primary : t.colors.text.muted }]}>
-            {field.value ?? (field.key === 'room' && !location ? 'Select location first' : 'Select an option')}
-          </Text>
-          <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
-        </Pressable>
-      </View>
+      <Pressable
+        disabled={field.disabled}
+        onPress={() => {
+          setSortWheelOpen(false);
+          setWheelFieldKey(field.key);
+          setWheelDraftValue(field.value ?? '');
+        }}
+        style={({ pressed }) => [
+          {
+            minHeight: 52,
+            borderWidth: 1,
+            borderColor: t.colors.border.subtle,
+            borderRadius: t.radius.lg,
+            backgroundColor: t.colors.card.surface,
+            paddingHorizontal: t.spacing.md,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexDirection: 'row',
+            opacity: pressed ? 0.96 : 1,
+          },
+        ]}
+      >
+        <Text style={[t.text.body, { color: field.value ? t.colors.text.primary : t.colors.text.muted }]} numberOfLines={1}>
+          {field.value ??
+            (field.key === 'room' && !location
+              ? 'Select location first'
+              : field.key === 'subCategory' && !category
+                ? 'Select category first'
+                : 'Select an option')}
+        </Text>
+        <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
+      </Pressable>
     </View>
   );
 
   const filterField = (key: DropdownKey) => filterFields.find((field) => field.key === key)!;
 
-  const rows = searchResults;
+  const rows = React.useMemo(() => {
+    const filtered = searchResults.filter((asset) => {
+      if (subCategory && asset.sub_category !== subCategory) return false;
+      if (fohBoh && asset.foh_boh !== fohBoh) return false;
+      if (inspectionFrequency && asset.inspection_frequency !== inspectionFrequency) return false;
+      return true;
+    });
 
-  const assignmentInProgressFor = (assetId: string) => {
-    return assignments.find(
-      (assignment) =>
-        assignment.assetId === assetId &&
-        ['Assigned', 'InProgress', 'DraftSaved'].includes(assignment.status)
-    );
-  };
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'criticalityHighLow') {
+        return (CRITICALITY_ORDER[b.criticality ?? ''] ?? 0) - (CRITICALITY_ORDER[a.criticality ?? ''] ?? 0);
+      }
 
-  const toneForCell = (kind: 'condition' | 'criticality', value: string) => {
-    if (kind === 'condition') {
-      if (value === 'Excellent' || value === 'Good') return { bg: 'rgba(47,107,75,0.12)', text: '#1F563D' };
-      if (value === 'Fair') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
-      return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
+      if (sortBy === 'status') {
+        return String(a.status ?? '').localeCompare(String(b.status ?? ''));
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [searchResults, subCategory, fohBoh, inspectionFrequency, sortBy]);
+
+  const toneForCell = (kind: 'status' | 'criticality', value?: string | null) => {
+    if (kind === 'status') {
+      if (value === 'Active') return { bg: 'rgba(47,107,75,0.12)', text: '#1F563D' };
+      if (value === 'Under repair') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
+      if (value === 'Missing') return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
+      return { bg: 'rgba(30,31,28,0.10)', text: '#474B44' };
     }
+
     if (value === 'Low') return { bg: 'rgba(30,31,28,0.10)', text: '#474B44' };
     if (value === 'Medium') return { bg: 'rgba(82,117,151,0.16)', text: '#314F6B' };
     if (value === 'High') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
-    return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
+    if (value === 'Critical') return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
+    return { bg: 'rgba(30,31,28,0.10)', text: '#474B44' };
   };
 
   return (
@@ -405,7 +621,7 @@ export default function AdminAssetsPage() {
         <View>
           <Text style={[t.text.title, { fontSize: 28, lineHeight: 34 }]}>Asset Management</Text>
           <Text style={[t.text.caption, { marginTop: -4 }]}>
-            Source-of-truth view for registered sanctuary assets. {rows.length} loaded.
+            Static asset registry for sanctuary assets. {rows.length} shown.
           </Text>
         </View>
         <ButtonLike label="Add asset" variant="primary" onPress={() => router.push('/admin/assets/create' as any)} />
@@ -417,66 +633,8 @@ export default function AdminAssetsPage() {
 
       <View style={{ gap: t.spacing.md }}>
         <View style={{ flexDirection: 'row', gap: t.spacing.sm }}>
-          <Pressable
-            onPress={() => setFilterMode('search')}
-            style={({ pressed }) => [
-              {
-                minHeight: 38,
-                borderRadius: 999,
-                paddingHorizontal: 14,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: filterMode === 'search' ? 'rgba(31,59,44,0.22)' : t.colors.border.subtle,
-                backgroundColor:
-                  filterMode === 'search'
-                    ? t.colors.brand.forestTint
-                    : pressed
-                      ? 'rgba(30,31,28,0.04)'
-                      : t.colors.card.surface,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                t.text.caption,
-                { fontWeight: '700', color: filterMode === 'search' ? t.colors.brand.forest : t.colors.text.secondary },
-              ]}
-            >
-              Search
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setFilterMode('filters')}
-            style={({ pressed }) => [
-              {
-                minHeight: 38,
-                borderRadius: 999,
-                paddingHorizontal: 14,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: filterMode === 'filters' ? 'rgba(31,59,44,0.22)' : t.colors.border.subtle,
-                backgroundColor:
-                  filterMode === 'filters'
-                    ? t.colors.brand.forestTint
-                    : pressed
-                      ? 'rgba(30,31,28,0.04)'
-                      : t.colors.card.surface,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                t.text.caption,
-                { fontWeight: '700', color: filterMode === 'filters' ? t.colors.brand.forest : t.colors.text.secondary },
-              ]}
-            >
-              Search by filters
-            </Text>
-          </Pressable>
-
+          <FilterModeButton label="Search" active={filterMode === 'search'} onPress={() => setFilterMode('search')} />
+          <FilterModeButton label="Search by filters" active={filterMode === 'filters'} onPress={() => setFilterMode('filters')} />
           <View style={{ flex: 1 }} />
           <ButtonLike label="Reference data" onPress={() => router.push('/admin/reference-data' as any)} />
         </View>
@@ -485,26 +643,30 @@ export default function AdminAssetsPage() {
           <SearchInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search asset name, code, category or description..."          />
+            placeholder="Search asset code, name, category, sub-category or description..."
+          />
         ) : (
           <View style={{ gap: t.spacing.md }}>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-              {renderDropdownField(filterField('area'))}
               {renderDropdownField(filterField('location'))}
+              {renderDropdownField(filterField('room'))}
             </View>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-              {renderDropdownField(filterField('room'))}
               {renderDropdownField(filterField('category'))}
+              {renderDropdownField(filterField('subCategory'))}
             </View>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
               {renderDropdownField(filterField('department'))}
-              {renderDropdownField(filterField('condition'))}
+              {renderDropdownField(filterField('fohBoh'))}
             </View>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
               {renderDropdownField(filterField('criticality'))}
               {renderDropdownField(filterField('status'))}
             </View>
-            {!location ? <Text style={t.text.caption}>Select a location to enable room filtering.</Text> : null}
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              {renderDropdownField(filterField('inspectionFrequency'))}
+              <View style={{ flex: 1 }} />
+            </View>
           </View>
         )}
 
@@ -524,9 +686,7 @@ export default function AdminAssetsPage() {
                 },
               ]}
             >
-              <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>
-                Reset filters
-              </Text>
+              <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>Reset filters</Text>
             </Pressable>
           </View>
         ) : null}
@@ -537,9 +697,7 @@ export default function AdminAssetsPage() {
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md }}>
-        <Text style={[t.text.title, { fontSize: 26, lineHeight: 32, marginBottom: t.spacing.md }]}>
-          Asset Results
-        </Text>
+        <Text style={[t.text.title, { fontSize: 26, lineHeight: 32, marginBottom: t.spacing.md }]}>Asset Results</Text>
 
         <Pressable
           onPress={openSortSelector}
@@ -565,19 +723,13 @@ export default function AdminAssetsPage() {
         </Pressable>
       </View>
 
-      <Text style={[t.text.caption, { marginTop: -t.spacing.md, marginBottom: t.spacing.md }]}>
-        Table view for quick scanning and comparison.
-      </Text>
-
-      {loadingSearch && (
+      {loadingSearch ? (
         <View style={{ paddingVertical: 10 }}>
           <ActivityIndicator size="small" />
         </View>
-      )}
+      ) : null}
 
-      {!loadingSearch && rows.length === 0 && (
-        <Text style={t.text.caption}>No assets found.</Text>
-      )}
+      {!loadingSearch && rows.length === 0 ? <Text style={t.text.caption}>No assets found.</Text> : null}
 
       <View
         style={{
@@ -599,19 +751,19 @@ export default function AdminAssetsPage() {
             borderBottomColor: t.colors.border.subtle,
           }}
         >
-          <Text style={[t.text.caption, { flex: 2.8, fontWeight: '700' }]}>Asset</Text>
+          <Text style={[t.text.caption, { flex: 2.6, fontWeight: '700' }]}>Asset</Text>
+          <Text style={[t.text.caption, { flex: 2, fontWeight: '700' }]}>Category</Text>
           <Text style={[t.text.caption, { flex: 2.2, fontWeight: '700' }]}>Location Context</Text>
-          <Text style={[t.text.caption, { flex: 1, fontWeight: '700', textAlign: 'center' }]}>Condition</Text>
+          <Text style={[t.text.caption, { flex: 1, fontWeight: '700', textAlign: 'center' }]}>Status</Text>
           <Text style={[t.text.caption, { flex: 1, fontWeight: '700', textAlign: 'center' }]}>Criticality</Text>
-          <Text style={[t.text.caption, { flex: 1.2, fontWeight: '700', textAlign: 'center' }]}>Actions</Text>
+          <Text style={[t.text.caption, { flex: 0.8, fontWeight: '700', textAlign: 'center' }]}>Actions</Text>
         </View>
 
         {rows.map((a, idx) => {
-          const currentAssignment = assignmentInProgressFor(a.id);
-          const departmentLabel = departmentNamesById[a.dept_id] || 'Unknown department';
-          const locationLabel = locationNamesById[a.location_id] || 'Location unknown';
-          const roomLabel = roomNamesById[a.room_id] || 'Room not set';
-          const conditionColors = toneForCell('condition', a.condition);
+          const departmentLabel = departmentName(a);
+          const locationLabel = locationName(a);
+          const roomLabel = roomName(a);
+          const statusColors = toneForCell('status', a.status);
           const criticalityColors = toneForCell('criticality', a.criticality);
 
           return (
@@ -630,11 +782,14 @@ export default function AdminAssetsPage() {
                 },
               ]}
             >
-              <View style={{ flex: 2.8, paddingRight: t.spacing.md }}>
+              <View style={{ flex: 2.6, paddingRight: t.spacing.md }}>
                 <Text style={[t.text.body, { fontWeight: '700', color: t.colors.brand.forest }]}>{a.name}</Text>
-                <Text style={[t.text.caption, { marginTop: 2 }]}>
-                  {a.asset_code} · {a.category}
-                </Text>
+                <Text style={[t.text.caption, { marginTop: 2 }]}>{a.asset_code}</Text>
+              </View>
+
+              <View style={{ flex: 2, paddingRight: t.spacing.md }}>
+                <Text style={t.text.caption}>{a.category}</Text>
+                <Text style={[t.text.caption, { marginTop: 2 }]}>{a.sub_category || 'No sub-category'}</Text>
               </View>
 
               <View style={{ flex: 2.2, paddingRight: t.spacing.md }}>
@@ -647,16 +802,15 @@ export default function AdminAssetsPage() {
               <View style={{ flex: 1, alignItems: 'center' }}>
                 <View
                   style={{
-                    alignSelf: 'center',
                     borderRadius: 10,
                     paddingHorizontal: 12,
                     paddingVertical: 7,
-                    backgroundColor: conditionColors.bg,
+                    backgroundColor: statusColors.bg,
                     maxWidth: '100%',
                   }}
                 >
-                  <Text style={{ color: conditionColors.text, fontSize: 12, fontWeight: '700', lineHeight: 16 }} numberOfLines={2}>
-                    {a.condition === 'Needs urgent attention' ? 'Urgent' : a.condition}
+                  <Text style={{ color: statusColors.text, fontSize: 12, fontWeight: '700', lineHeight: 16 }} numberOfLines={2}>
+                    {a.status}
                   </Text>
                 </View>
               </View>
@@ -664,26 +818,19 @@ export default function AdminAssetsPage() {
               <View style={{ flex: 1, alignItems: 'center' }}>
                 <View
                   style={{
-                    alignSelf: 'center',
                     borderRadius: 10,
                     paddingHorizontal: 12,
                     paddingVertical: 7,
                     backgroundColor: criticalityColors.bg,
                   }}
                 >
-                  <Text style={{ color: criticalityColors.text, fontSize: 12, fontWeight: '700' }}>{a.criticality}</Text>
+                  <Text style={{ color: criticalityColors.text, fontSize: 12, fontWeight: '700' }}>
+                    {a.criticality || 'Not set'}
+                  </Text>
                 </View>
               </View>
 
-              <View style={{ flex: 1.2, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 14 }}>
-                <Pressable
-                  onPress={() => router.push(`/admin/assets/assign-report/${a.id}` as any)}
-                  hitSlop={8}
-                  style={({ pressed }) => [{ opacity: pressed ? 0.65 : 1 }]}
-                >
-                  <FontAwesome name={currentAssignment ? 'check-circle' : 'user-plus'} size={16} color="#2F5B45" />
-                </Pressable>
-
+              <View style={{ flex: 0.8, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 14 }}>
                 <Pressable
                   onPress={() => router.push((`/admin/assets/edit/${a.id}` as any) as any)}
                   hitSlop={8}
@@ -798,15 +945,13 @@ export default function AdminAssetsPage() {
             {sortWheelOpen ? (
               <Picker
                 selectedValue={sortWheelDraftValue}
-                onValueChange={(value) =>
-                  setSortWheelDraftValue(value as 'alphabetical' | 'conditionLowHigh' | 'criticalityHighLow')
-                }
+                onValueChange={(value) => setSortWheelDraftValue(value as SortMode)}
                 style={{ height: 230 }}
                 itemStyle={{ fontSize: 18 }}
               >
                 <Picker.Item label="Sort alphabetic (A-Z)" value="alphabetical" />
-                <Picker.Item label="Condition (Low-High)" value="conditionLowHigh" />
                 <Picker.Item label="Criticality (High-Low)" value="criticalityHighLow" />
+                <Picker.Item label="Status" value="status" />
               </Picker>
             ) : (
               <Picker
@@ -815,7 +960,16 @@ export default function AdminAssetsPage() {
                 style={{ height: 230 }}
                 itemStyle={{ fontSize: 18 }}
               >
-                <Picker.Item label={wheelFieldKey === 'room' && !location ? 'Select location first' : 'Select an option'} value="" />
+                <Picker.Item
+                  label={
+                    wheelFieldKey === 'room' && !location
+                      ? 'Select location first'
+                      : wheelFieldKey === 'subCategory' && !category
+                        ? 'Select category first'
+                        : 'Select an option'
+                  }
+                  value=""
+                />
                 {(filterFields.find((field) => field.key === wheelFieldKey)?.options ?? []).map((option) => (
                   <Picker.Item key={option.value} label={option.label} value={option.value} />
                 ))}
@@ -929,6 +1083,7 @@ export default function AdminAssetsPage() {
 
                       await deleteAsset(assetPendingDelete.id);
                       setAssetRows((prev) => prev.filter((item) => item.id !== assetPendingDelete.id));
+                      setSearchResults((prev) => prev.filter((item) => item.id !== assetPendingDelete.id));
                       setAssetPendingDelete(null);
                       setDeleteStep('confirm');
                       setDeleteNameInput('');
@@ -942,6 +1097,48 @@ export default function AdminAssetsPage() {
         </View>
       </Modal>
     </AdminScreenScaffold>
+  );
+}
+
+function FilterModeButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        {
+          minHeight: 38,
+          borderRadius: 999,
+          paddingHorizontal: 14,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 1,
+          borderColor: active ? 'rgba(31,59,44,0.22)' : t.colors.border.subtle,
+          backgroundColor: active ? t.colors.brand.forestTint : pressed ? 'rgba(30,31,28,0.04)' : t.colors.card.surface,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          t.text.caption,
+          {
+            fontWeight: '700',
+            color: active ? t.colors.brand.forest : t.colors.text.secondary,
+          },
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 

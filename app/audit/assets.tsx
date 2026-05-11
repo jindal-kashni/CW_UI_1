@@ -1,6 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+
 import { SearchInput } from '@/src/components';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
@@ -19,21 +20,178 @@ type ActiveTab = 'assets' | 'locations' | 'rooms';
 
 type DropdownKey =
   | 'assetCategory'
+  | 'assetSubCategory'
   | 'assetDepartment'
   | 'assetLocation'
   | 'assetRoom'
-  | 'assetCondition'
+  | 'assetFohBoh'
   | 'assetCriticality'
+  | 'assetInspectionFrequency'
   | 'assetStatus'
   | 'locationDepartment'
   | 'locationSiteZone'
   | 'locationType'
-  | 'roomLocation'
+  | 'roomLocation';
 
 type Option = {
   label: string;
   value: string;
 };
+
+const CATEGORY_OPTIONS = [
+  'Electrical Equipment',
+  'HVAC / Refrigeration',
+  'Vehicles & Mobile Machinery',
+  'Furniture & External Fixtures',
+  'WHS & Safety Equipment',
+  'Interior Infrastructure',
+  'Exterior Infrastructure',
+  'Playground Assets',
+  'Grounds & Maintenance Equipment',
+  'Other / Miscellaneous',
+];
+
+const SUB_CATEGORY_OPTIONS: Record<string, string[]> = {
+  'Electrical Equipment': [
+    'Appliance',
+    'Kitchen Equipment',
+    'Workshop Equipment',
+    'Pump',
+    'Motor',
+    'Generator',
+    'Lighting Equipment',
+    'Battery System',
+    'Charging Station',
+    'Electrical Cabinet',
+    'Switchboard',
+    'Portable Equipment',
+    'Other Electrical',
+  ],
+  'HVAC / Refrigeration': [
+    'Air Conditioner',
+    'Split System',
+    'Ducted System',
+    'Exhaust Fan',
+    'Ventilation System',
+    'Freezer',
+    'Fridge',
+    'Cool Room',
+    'Compressor',
+    'Dehumidifier',
+    'Other HVAC',
+  ],
+  'Vehicles & Mobile Machinery': [
+    'Car',
+    'Truck',
+    'Buggy',
+    'Forklift',
+    'Trailer',
+    'Ride-on Mower',
+    'Excavator',
+    'Scissor Lift',
+    'Mobile Plant',
+    'Other Vehicle',
+  ],
+  'Furniture & External Fixtures': [
+    'Bench',
+    'Outdoor Table',
+    'Bin',
+    'Shade Umbrella',
+    'Picnic Setting',
+    'Display Unit',
+    'Barrier',
+    'Queue Rail',
+    'Storage Cabinet',
+    'Shelving',
+    'External Seating',
+    'Other Fixture',
+  ],
+  'WHS & Safety Equipment': [
+    'Fire Extinguisher',
+    'Fire Blanket',
+    'First Aid Kit',
+    'Spill Kit',
+    'Emergency Lighting',
+    'Exit Sign',
+    'Smoke Detector',
+    'Eyewash Station',
+    'PPE Station',
+    'Safety Barrier',
+    'Defibrillator',
+    'Other WHS',
+  ],
+  'Interior Infrastructure': [
+    'Paint',
+    'Flooring',
+    'Ceiling',
+    'Internal Wall',
+    'Lighting',
+    'Plumbing Fixture',
+    'Door',
+    'Window',
+    'Cabinetry',
+    'Tiling',
+    'Internal Signage',
+    'Handrail',
+    'Partition',
+    'Other Interior',
+  ],
+  'Exterior Infrastructure': [
+    'Roof',
+    'Gutter',
+    'External Wall',
+    'Fence',
+    'Gate',
+    'Pathway',
+    'Decking',
+    'Drainage',
+    'Outdoor Signage',
+    'Shade Structure',
+    'Retaining Wall',
+    'Kerbing',
+    'Stairs',
+    'Ramp',
+    'Bridge',
+    'Other Exterior',
+  ],
+  'Playground Assets': [
+    'Play Structure',
+    'Swing',
+    'Slide',
+    'Climbing Equipment',
+    'Soft Fall Surface',
+    'Shade Sail',
+    'Playground Fence',
+    'Playground Gate',
+    'Playground Signage',
+    'Interactive Equipment',
+    'Other Playground',
+  ],
+  'Grounds & Maintenance Equipment': [
+    'Power Tool',
+    'Garden Tool',
+    'Lawn Equipment',
+    'Chainsaw',
+    'Leaf Blower',
+    'Whipper Snipper',
+    'Maintenance Cart',
+    'Pressure Cleaner',
+    'Pump Equipment',
+    'Cleaning Equipment',
+    'Workshop Tool',
+    'Other Grounds Equipment',
+  ],
+  'Other / Miscellaneous': ['Miscellaneous', 'Temporary Asset', 'Unclassified', 'Specialty Item', 'Other'],
+};
+
+function textValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return '—';
+  return String(value);
+}
+
+function moneyValue(value: unknown) {
+  return typeof value === 'number' ? `$${value.toLocaleString()}` : '—';
+}
 
 export default function AuditAssetListScreen() {
   const t = useTheme();
@@ -52,11 +210,13 @@ export default function AuditAssetListScreen() {
   const [expandedRoomId, setExpandedRoomId] = React.useState<string | null>(null);
 
   const [assetCategory, setAssetCategory] = React.useState('');
+  const [assetSubCategory, setAssetSubCategory] = React.useState('');
   const [assetDepartment, setAssetDepartment] = React.useState('');
   const [assetLocation, setAssetLocation] = React.useState('');
   const [assetRoom, setAssetRoom] = React.useState('');
-  const [assetCondition, setAssetCondition] = React.useState('');
+  const [assetFohBoh, setAssetFohBoh] = React.useState('');
   const [assetCriticality, setAssetCriticality] = React.useState('');
+  const [assetInspectionFrequency, setAssetInspectionFrequency] = React.useState('');
   const [assetStatus, setAssetStatus] = React.useState('');
 
   const [locationDepartment, setLocationDepartment] = React.useState('');
@@ -109,15 +269,26 @@ export default function AuditAssetListScreen() {
     [rooms]
   );
 
-  const makeOptions = (values: string[]) =>
-    Array.from(new Set(values.filter(Boolean)))
+  const makeOptions = (values: Array<string | null | undefined>) =>
+    Array.from(new Set(values.filter((value): value is string => Boolean(value))))
       .sort((a, b) => a.localeCompare(b))
       .map((value) => ({ label: value, value }));
 
+  const safeDepartmentName = (deptId: string | null | undefined) =>
+    deptId ? departmentNameById[deptId] : undefined;
+
+  const safeLocationName = (locationId: string | null | undefined) =>
+    locationId ? locationNameById[locationId] : undefined;
+
+  const safeRoomName = (roomId: string | null | undefined) =>
+    roomId ? roomNameById[roomId] : undefined;
+
   const assetLocationId = locations.find((item) => item.name === assetLocation)?.id;
+  const assetSubCategoryOptions = assetCategory ? SUB_CATEGORY_OPTIONS[assetCategory] ?? [] : [];
 
   const dropdownOptions: Record<DropdownKey, Option[]> = {
-    assetCategory: makeOptions(assets.map((item) => item.category)),
+    assetCategory: CATEGORY_OPTIONS.map((value) => ({ label: value, value })),
+    assetSubCategory: assetSubCategoryOptions.map((value) => ({ label: value, value })),
     assetDepartment: makeOptions(departments.map((item) => item.name)),
     assetLocation: makeOptions(locations.map((item) => item.name)),
     assetRoom: makeOptions(
@@ -125,9 +296,22 @@ export default function AuditAssetListScreen() {
         .filter((item) => !assetLocationId || item.locationId === assetLocationId)
         .map((item) => item.name)
     ),
-    assetCondition: ['Excellent', 'Good', 'Fair', 'Poor', 'Needs urgent attention'].map((value) => ({ label: value, value })),
-    assetCriticality: ['Low', 'Medium', 'High', 'Critical'].map((value) => ({ label: value, value })),
-    assetStatus: ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'].map((value) => ({ label: value, value })),
+    assetFohBoh: ['FOH', 'BOH', 'Mixed'].map((value) => ({ label: value, value })),
+    assetCriticality: ['Critical', 'High', 'Medium', 'Low'].map((value) => ({ label: value, value })),
+    assetInspectionFrequency: [
+      'Monthly',
+      'Quarterly',
+      '6-monthly',
+      'Annually',
+      'Every 2 years',
+      'Every 3 years',
+      'Every 5 years',
+      'As required',
+    ].map((value) => ({ label: value, value })),
+    assetStatus: ['Active', 'Under repair', 'Decommissioned', 'Disposed', 'Missing'].map((value) => ({
+      label: value,
+      value,
+    })),
 
     locationDepartment: makeOptions(departments.map((item) => item.name)),
     locationSiteZone: makeOptions(locations.map((item) => item.siteZone)),
@@ -138,11 +322,13 @@ export default function AuditAssetListScreen() {
 
   const dropdownLabels: Record<DropdownKey, string> = {
     assetCategory: 'Category',
+    assetSubCategory: 'Sub-category',
     assetDepartment: 'Department',
     assetLocation: 'Location',
     assetRoom: 'Room',
-    assetCondition: 'Condition',
+    assetFohBoh: 'FOH / BOH',
     assetCriticality: 'Criticality',
+    assetInspectionFrequency: 'Inspection frequency',
     assetStatus: 'Status',
     locationDepartment: 'Department',
     locationSiteZone: 'Site zone',
@@ -152,11 +338,13 @@ export default function AuditAssetListScreen() {
 
   const dropdownValues: Record<DropdownKey, string> = {
     assetCategory,
+    assetSubCategory,
     assetDepartment,
     assetLocation,
     assetRoom,
-    assetCondition,
+    assetFohBoh,
     assetCriticality,
+    assetInspectionFrequency,
     assetStatus,
     locationDepartment,
     locationSiteZone,
@@ -165,15 +353,20 @@ export default function AuditAssetListScreen() {
   };
 
   const setDropdownValue = (key: DropdownKey, value: string) => {
-    if (key === 'assetCategory') setAssetCategory(value);
+    if (key === 'assetCategory') {
+      setAssetCategory(value);
+      setAssetSubCategory('');
+    }
+    if (key === 'assetSubCategory') setAssetSubCategory(value);
     if (key === 'assetDepartment') setAssetDepartment(value);
     if (key === 'assetLocation') {
       setAssetLocation(value);
       setAssetRoom('');
     }
     if (key === 'assetRoom') setAssetRoom(value);
-    if (key === 'assetCondition') setAssetCondition(value);
+    if (key === 'assetFohBoh') setAssetFohBoh(value);
     if (key === 'assetCriticality') setAssetCriticality(value);
+    if (key === 'assetInspectionFrequency') setAssetInspectionFrequency(value);
     if (key === 'assetStatus') setAssetStatus(value);
 
     if (key === 'locationDepartment') setLocationDepartment(value);
@@ -191,11 +384,13 @@ export default function AuditAssetListScreen() {
   const clearFilters = () => {
     setQuery('');
     setAssetCategory('');
+    setAssetSubCategory('');
     setAssetDepartment('');
     setAssetLocation('');
     setAssetRoom('');
-    setAssetCondition('');
+    setAssetFohBoh('');
     setAssetCriticality('');
+    setAssetInspectionFrequency('');
     setAssetStatus('');
     setLocationDepartment('');
     setLocationSiteZone('');
@@ -207,21 +402,23 @@ export default function AuditAssetListScreen() {
 
   const filteredAssets = assets
     .filter((asset) => {
-      const locationName = locationNameById[asset.location_id] ?? '';
-      const roomName = roomNameById[asset.room_id] ?? '';
-      const departmentName = departmentNameById[asset.dept_id] ?? '';
+      const locationName = safeLocationName(asset.location_id) ?? '';
+      const roomName = safeRoomName(asset.room_id) ?? '';
+      const departmentName = safeDepartmentName(asset.dept_id) ?? '';
 
       if (assetCategory && asset.category !== assetCategory) return false;
+      if (assetSubCategory && asset.sub_category !== assetSubCategory) return false;
       if (assetDepartment && departmentName !== assetDepartment) return false;
       if (assetLocation && locationName !== assetLocation) return false;
       if (assetRoom && roomName !== assetRoom) return false;
-      if (assetCondition && asset.condition !== assetCondition) return false;
+      if (assetFohBoh && asset.foh_boh !== assetFohBoh) return false;
       if (assetCriticality && asset.criticality !== assetCriticality) return false;
+      if (assetInspectionFrequency && asset.inspection_frequency !== assetInspectionFrequency) return false;
       if (assetStatus && asset.status !== assetStatus) return false;
 
       if (!q) return true;
 
-      return `${asset.name} ${asset.asset_code} ${asset.category} ${asset.sub_category} ${asset.description} ${asset.make_model} ${asset.serial_number} ${asset.condition} ${asset.criticality} ${asset.status} ${locationName} ${roomName} ${departmentName}`
+      return `${asset.name} ${asset.asset_code} ${asset.category} ${asset.sub_category} ${asset.description} ${asset.make_model} ${asset.serial_number} ${asset.criticality} ${asset.status} ${asset.foh_boh} ${asset.inspection_frequency} ${locationName} ${roomName} ${departmentName}`
         .toLowerCase()
         .includes(q);
     })
@@ -229,7 +426,7 @@ export default function AuditAssetListScreen() {
 
   const filteredLocations = locations
     .filter((location) => {
-      const departmentName = departmentNameById[location.departmentId] ?? '';
+      const departmentName = safeDepartmentName(location.departmentId) ?? '';
 
       if (locationDepartment && departmentName !== locationDepartment) return false;
       if (locationSiteZone && location.siteZone !== locationSiteZone) return false;
@@ -245,7 +442,7 @@ export default function AuditAssetListScreen() {
 
   const filteredRooms = rooms
     .filter((room) => {
-      const locationName = locationNameById[room.locationId] ?? '';
+      const locationName = safeLocationName(room.locationId) ?? '';
 
       if (roomLocation && locationName !== roomLocation) return false;
 
@@ -293,7 +490,10 @@ export default function AuditAssetListScreen() {
           },
         ]}
       >
-        <Text style={[t.text.body, { color: dropdownValues[fieldKey] ? t.colors.text.primary : t.colors.text.muted }]}>
+        <Text
+          style={[t.text.body, { color: dropdownValues[fieldKey] ? t.colors.text.primary : t.colors.text.muted }]}
+          numberOfLines={1}
+        >
           {dropdownValues[fieldKey] || (disabled ? 'Select parent first' : 'Select an option')}
         </Text>
         <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
@@ -332,16 +532,18 @@ export default function AuditAssetListScreen() {
   const hasActiveFilters =
     Boolean(query) ||
     Boolean(assetCategory) ||
+    Boolean(assetSubCategory) ||
     Boolean(assetDepartment) ||
     Boolean(assetLocation) ||
     Boolean(assetRoom) ||
-    Boolean(assetCondition) ||
+    Boolean(assetFohBoh) ||
     Boolean(assetCriticality) ||
+    Boolean(assetInspectionFrequency) ||
     Boolean(assetStatus) ||
     Boolean(locationDepartment) ||
     Boolean(locationSiteZone) ||
     Boolean(locationType) ||
-    Boolean(roomLocation)
+    Boolean(roomLocation);
 
   return (
     <ScreenContainer>
@@ -379,7 +581,7 @@ export default function AuditAssetListScreen() {
           onChangeText={setQuery}
           placeholder={
             activeTab === 'assets'
-              ? 'Search assets by name, code, category, location or room...'
+              ? 'Search assets by name, code, category, sub-category, location or room...'
               : activeTab === 'locations'
                 ? 'Search locations by name, type, zone, department or notes...'
                 : 'Search rooms by name, number, floor, location or notes...'
@@ -390,18 +592,22 @@ export default function AuditAssetListScreen() {
           <View style={{ gap: t.spacing.md }}>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
               <DropdownField fieldKey="assetCategory" />
+              <DropdownField fieldKey="assetSubCategory" disabled={!assetCategory} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
               <DropdownField fieldKey="assetDepartment" />
-            </View>
-            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
               <DropdownField fieldKey="assetLocation" />
+            </View>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
               <DropdownField fieldKey="assetRoom" disabled={!assetLocation} />
+              <DropdownField fieldKey="assetFohBoh" />
             </View>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-              <DropdownField fieldKey="assetCondition" />
               <DropdownField fieldKey="assetCriticality" />
+              <DropdownField fieldKey="assetStatus" />
             </View>
             <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-              <DropdownField fieldKey="assetStatus" />
+              <DropdownField fieldKey="assetInspectionFrequency" />
               <View style={{ flex: 1 }} />
             </View>
           </View>
@@ -483,37 +689,46 @@ export default function AuditAssetListScreen() {
                     <Text style={[t.text.body, { fontWeight: '700' }]}>{asset.name}</Text>
                     <Text style={t.text.caption}>
                       {asset.asset_code} · {asset.category || 'No category'} ·{' '}
-                      {locationNameById[asset.location_id] || 'Unknown location'}
+                      {asset.sub_category || 'No sub-category'} · {safeLocationName(asset.location_id) || 'Unknown location'}
                     </Text>
 
                     {expanded ? (
-                      <View style={{ marginTop: t.spacing.sm, borderTopWidth: 1, borderTopColor: t.colors.border.subtle, paddingTop: t.spacing.sm, gap: 4 }}>
+                      <View
+                        style={{
+                          marginTop: t.spacing.sm,
+                          borderTopWidth: 1,
+                          borderTopColor: t.colors.border.subtle,
+                          paddingTop: t.spacing.sm,
+                          gap: 4,
+                        }}
+                      >
                         <DetailLine label="Asset ID" value={asset.id} />
                         <DetailLine label="Asset code" value={asset.asset_code} />
                         <DetailLine label="Name" value={asset.name} />
                         <DetailLine label="Category" value={asset.category} />
-                        <DetailLine label="Sub category" value={asset.sub_category} />
+                        <DetailLine label="Sub-category" value={asset.sub_category} />
                         <DetailLine label="Description" value={asset.description} />
+                        <DetailLine label="Department" value={safeDepartmentName(asset.dept_id)} />
+                        <DetailLine label="Location" value={safeLocationName(asset.location_id)} />
+                        <DetailLine label="Room" value={safeRoomName(asset.room_id)} />
+                        <DetailLine label="FOH / BOH" value={asset.foh_boh} />
                         <DetailLine label="Make/model" value={asset.make_model} />
                         <DetailLine label="Serial number" value={asset.serial_number} />
-                        <DetailLine label="Condition" value={asset.condition} />
-                        <DetailLine label="Criticality" value={asset.criticality} />
-                        <DetailLine label="Status" value={asset.status} />
-                        <DetailLine label="Department" value={departmentNameById[asset.dept_id]} />
-                        <DetailLine label="Location" value={locationNameById[asset.location_id]} />
-                        <DetailLine label="Room" value={roomNameById[asset.room_id]} />
-                        <DetailLine label="Assigned to" value={asset.assigned_to} />
-                        <DetailLine label="Remaining life" value={`${asset.remaining_life_years || 0} years`} />
-                        <DetailLine label="Utilisation" value={asset.utilisation} />
-                        <DetailLine label="Compatibility of use" value={asset.compatibility_of_use} />
-                        <DetailLine label="Environmental impact" value={asset.environmental_impact} />
                         <DetailLine label="Purchase date" value={asset.purchase_date} />
-                        <DetailLine label="Purchase cost" value={typeof asset.purchase_cost === 'number' ? `$${asset.purchase_cost.toLocaleString()}` : '—'} />
-                        <DetailLine label="Replacement cost" value={typeof asset.replacement_cost === 'number' ? `$${asset.replacement_cost.toLocaleString()}` : '—'} />
+                        <DetailLine label="Purchase cost" value={moneyValue(asset.purchase_cost)} />
+                        <DetailLine label="Replacement cost" value={moneyValue(asset.replacement_cost)} />
                         <DetailLine label="Warranty expiry" value={asset.warranty_expiry} />
-                        <DetailLine label="Last serviced" value={asset.last_serviced_date} />
-                        <DetailLine label="Next service" value={asset.next_service_date} />
-                        <DetailLine label="Notes" value={asset.notes} />
+                        <DetailLine label="Criticality" value={asset.criticality} />
+                        <DetailLine label="Inspection frequency" value={asset.inspection_frequency} />
+                        <DetailLine label="Status" value={asset.status} />
+                        <DetailLine
+                          label="Photos"
+                          value={
+                            asset.asset_photo_urls?.length
+                              ? `${asset.asset_photo_urls.length} reference photo(s)`
+                              : 'No photos uploaded'
+                          }
+                        />
                       </View>
                     ) : null}
 
@@ -552,18 +767,25 @@ export default function AuditAssetListScreen() {
                   >
                     <Text style={[t.text.body, { fontWeight: '700' }]}>{location.name}</Text>
                     <Text style={t.text.caption}>
-                      {location.type || 'Location'} · {location.siteZone || 'No zone'} ·{' '}
-                      {departmentNameById[location.departmentId] ?? 'Unknown department'}
+                      {textValue(location.type)} · {textValue(location.siteZone)} ·{' '}
+                      {safeDepartmentName(location.departmentId) || 'Unknown department'}
                     </Text>
 
                     {expanded ? (
-                      <View style={{ marginTop: t.spacing.sm, borderTopWidth: 1, borderTopColor: t.colors.border.subtle, paddingTop: t.spacing.sm, gap: 4 }}>
+                      <View
+                        style={{
+                          marginTop: t.spacing.sm,
+                          borderTopWidth: 1,
+                          borderTopColor: t.colors.border.subtle,
+                          paddingTop: t.spacing.sm,
+                          gap: 4,
+                        }}
+                      >
                         <DetailLine label="Location ID" value={location.id} />
                         <DetailLine label="Name" value={location.name} />
                         <DetailLine label="Type" value={location.type} />
                         <DetailLine label="Site zone" value={location.siteZone} />
-                        <DetailLine label="Department" value={departmentNameById[location.departmentId]} />
-                        <DetailLine label="Department ID" value={location.departmentId} />
+                        <DetailLine label="Department" value={safeDepartmentName(location.departmentId)} />
                         <DetailLine label="Star rating" value={location.starRating} />
                         <DetailLine label="Evacuation plan" value={location.evacuationPlanStatus} />
                         <DetailLine label="Heritage listed" value={location.heritageListed ? 'Yes' : 'No'} />
@@ -614,17 +836,24 @@ export default function AuditAssetListScreen() {
                     <Text style={[t.text.body, { fontWeight: '700' }]}>{room.name || room.id}</Text>
                     <Text style={t.text.caption}>
                       {room.roomNumber || 'No room number'} · {room.floorLevel || 'No floor'} ·{' '}
-                      {locationNameById[room.locationId] ?? 'Unknown location'}
+                      {safeLocationName(room.locationId) || 'Unknown location'}
                     </Text>
 
                     {expanded ? (
-                      <View style={{ marginTop: t.spacing.sm, borderTopWidth: 1, borderTopColor: t.colors.border.subtle, paddingTop: t.spacing.sm, gap: 4 }}>
+                      <View
+                        style={{
+                          marginTop: t.spacing.sm,
+                          borderTopWidth: 1,
+                          borderTopColor: t.colors.border.subtle,
+                          paddingTop: t.spacing.sm,
+                          gap: 4,
+                        }}
+                      >
                         <DetailLine label="Room ID" value={room.id} />
                         <DetailLine label="Room name" value={room.name} />
                         <DetailLine label="Room number" value={room.roomNumber} />
                         <DetailLine label="Floor level" value={room.floorLevel} />
-                        <DetailLine label="Location" value={locationNameById[room.locationId]} />
-                        <DetailLine label="Location ID" value={room.locationId} />
+                        <DetailLine label="Location" value={safeLocationName(room.locationId)} />
                         <DetailLine label="Notes" value={room.notes} />
                       </View>
                     ) : null}
@@ -642,12 +871,7 @@ export default function AuditAssetListScreen() {
         ) : null}
       </ScrollView>
 
-      <Modal
-        visible={Boolean(dropdownOpen)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDropdownOpen(null)}
-      >
+      <Modal visible={Boolean(dropdownOpen)} transparent animationType="fade" onRequestClose={() => setDropdownOpen(null)}>
         <View
           style={{
             flex: 1,

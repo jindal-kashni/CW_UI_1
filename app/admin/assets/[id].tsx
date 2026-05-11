@@ -1,14 +1,13 @@
 import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+
 import { Button, StatusBadge } from '@/src/components';
-import { assetAuditHistory } from '@/src/data';
 import { AdminAppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
-import { useDemoState } from '@/src/state/DemoStateProvider';
 import { useTheme } from '@/src/theme';
 import { formatDateDDMMYYYY } from '@/src/utils/date';
-import type { Asset, AssetCondition } from '@/src/types/models';
+import type { Asset } from '@/src/types/models';
 import { deleteAsset, fetchAssetById } from '@/src/services/assets';
 import {
   fetchDepartments,
@@ -18,16 +17,9 @@ import {
   type LocationRecord,
   type RoomRecord,
 } from '@/src/services/referenceData';
-import {
-  fetchCapexForecastForAsset,
-  fetchComplianceChecksForAsset,
-  type CapexForecastRecord,
-  type ComplianceCheckRecord,
-} from '@/src/services/adminInsights';
 
 export default function AdminAssetDetailPage() {
   const t = useTheme();
-  const { assignments } = useDemoState();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [asset, setAsset] = React.useState<Asset | null>(null);
@@ -39,11 +31,6 @@ export default function AdminAssetDetailPage() {
   const [assetPendingDelete, setAssetPendingDelete] = React.useState(false);
   const [deleteStep, setDeleteStep] = React.useState<'confirm' | 'type-name'>('confirm');
   const [deleteNameInput, setDeleteNameInput] = React.useState('');
-  const [selectedReport, setSelectedReport] = React.useState<(typeof assetAuditHistory)[number] | null>(null);
-
-  const [complianceChecks, setComplianceChecks] = React.useState<ComplianceCheckRecord[]>([]);
-  const [capexForecast, setCapexForecast] = React.useState<CapexForecastRecord[]>([]);
-  const [loadingInsights, setLoadingInsights] = React.useState(true);
 
   React.useEffect(() => {
     if (!id) return;
@@ -55,6 +42,7 @@ export default function AdminAssetDetailPage() {
         const data = await fetchAssetById(id);
 
         if (!data) {
+          setAsset(null);
           setLoading(false);
           return;
         }
@@ -78,30 +66,6 @@ export default function AdminAssetDetailPage() {
     };
 
     fetchAsset();
-  }, [id]);
-
-  React.useEffect(() => {
-    if (!id) return;
-
-    const fetchInsights = async () => {
-      setLoadingInsights(true);
-
-      try {
-        const [complianceRows, capexRows] = await Promise.all([
-          fetchComplianceChecksForAsset(id),
-          fetchCapexForecastForAsset(id),
-        ]);
-
-        setComplianceChecks(complianceRows);
-        setCapexForecast(capexRows);
-      } catch (error) {
-        console.log(error);
-      } finally {
-        setLoadingInsights(false);
-      }
-    };
-
-    fetchInsights();
   }, [id]);
 
   const SectionHeading = ({ title }: { title: string }) => (
@@ -151,94 +115,7 @@ export default function AdminAssetDetailPage() {
   }
 
   const currentAsset = asset;
-
-  const history = assetAuditHistory
-    .filter((h) => h.asset_id === currentAsset.id)
-    .sort((a, b) => new Date(a.audit_date).getTime() - new Date(b.audit_date).getTime());
-
   const statusLabel = currentAsset.status;
-
-  const conditionRank: Record<AssetCondition, number> = {
-    Excellent: 5,
-    Good: 4,
-    Fair: 3,
-    Poor: 2,
-    'Needs urgent attention': 1,
-  };
-
-  const scoreToCondition = (score: number): AssetCondition => {
-    if (score <= 1) return 'Needs urgent attention';
-    if (score <= 2) return 'Poor';
-    if (score <= 3) return 'Fair';
-    if (score <= 4) return 'Good';
-    return 'Excellent';
-  };
-
-  const inferConditionFromFinding = (finding: string, fallback: AssetCondition): AssetCondition => {
-    const text = finding.toLowerCase();
-
-    if (
-      text.includes('critical') ||
-      text.includes('urgent') ||
-      text.includes('cavitation') ||
-      text.includes('dilapidated')
-    ) {
-      return 'Needs urgent attention';
-    }
-
-    if (text.includes('poor') || text.includes('failed') || text.includes('corrosion') || text.includes('drop')) {
-      return 'Poor';
-    }
-
-    if (text.includes('fair') || text.includes('wear') || text.includes('fray') || text.includes('minor')) {
-      return 'Fair';
-    }
-
-    if (text.includes('excellent')) return 'Excellent';
-
-    if (text.includes('good') || text.includes('stable') || text.includes('nominal') || text.includes('no issues')) {
-      return 'Good';
-    }
-
-    return fallback;
-  };
-
-  const purchaseYear = currentAsset.purchase_date
-    ? new Date(currentAsset.purchase_date).getFullYear()
-    : new Date().getFullYear();
-
-  const expiryYear = purchaseYear + Math.max(1, currentAsset.remaining_life_years || 1);
-
-  const reportRows = history.map((h) => {
-    const year = new Date(h.audit_date).getFullYear();
-    const elapsedRatio = Math.min(1, Math.max(0, (year - purchaseYear) / Math.max(1, expiryYear - purchaseYear)));
-    const expectedScoreRaw = 5 - elapsedRatio * 5;
-    const observedCondition = inferConditionFromFinding(h.findings, currentAsset.condition);
-    const observedScore = conditionRank[observedCondition];
-    const expectedCondition = scoreToCondition(expectedScoreRaw);
-    const expectedScore = conditionRank[expectedCondition];
-
-    return {
-      ...h,
-      observedCondition,
-      observedScore,
-      expectedCondition,
-      expectedScore,
-      delta: observedScore - expectedScore,
-    };
-  });
-
-  const toneForCondition = (value: AssetCondition) => {
-    if (value === 'Excellent' || value === 'Good') return { bg: 'rgba(47,107,75,0.12)', text: '#1F563D' };
-    if (value === 'Fair') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421' };
-    return { bg: 'rgba(179,79,71,0.14)', text: '#7A2E29' };
-  };
-
-  const activeAssignment = assignments.find(
-    (assignment) =>
-      assignment.assetId === currentAsset.id &&
-      ['Assigned', 'InProgress', 'DraftSaved'].includes(assignment.status)
-  );
 
   const handleDeleteAsset = async () => {
     if (deleteNameInput !== currentAsset.name) return;
@@ -273,14 +150,14 @@ export default function AdminAssetDetailPage() {
           paddingBottom: t.spacing.xxxl,
         }}
       >
-        <SectionHeading title="Overview" />
+        <SectionHeading title="Core Asset Identification" />
 
         <View style={{ gap: t.spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing.md }}>
             <View style={{ flex: 1 }}>
               <Text style={[t.text.title, { fontSize: 26, lineHeight: 32 }]}>{currentAsset.name}</Text>
               <Text style={[t.text.caption, { marginTop: 4 }]}>
-                {currentAsset.asset_code} · {currentAsset.category} · {currentAsset.sub_category || 'No sub category'}
+                {currentAsset.asset_code} · {currentAsset.category} · {currentAsset.sub_category || 'No sub-category'}
               </Text>
             </View>
 
@@ -316,7 +193,7 @@ export default function AdminAssetDetailPage() {
 
         <SectionDivider />
 
-        <SectionHeading title="Location and ownership" />
+        <SectionHeading title="Asset Location & Ownership" />
 
         <View style={{ gap: 6 }}>
           <Text style={t.text.caption}>
@@ -329,402 +206,75 @@ export default function AdminAssetDetailPage() {
             <Text style={{ fontWeight: '700' }}>Department:</Text> {department?.name ?? 'Unknown'}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Assigned to:</Text> {currentAsset.assigned_to || 'Not assigned'}
+            <Text style={{ fontWeight: '700' }}>FOH / BOH:</Text> {currentAsset.foh_boh || 'Not set'}
           </Text>
         </View>
 
         <SectionDivider />
 
-        <SectionHeading title="Condition and criticality" />
+        <SectionHeading title="Asset Details" />
 
         <View style={{ gap: 6 }}>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Condition:</Text> {currentAsset.condition}
+            <Text style={{ fontWeight: '700' }}>Make / model:</Text> {currentAsset.make_model || 'Not set'}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Criticality:</Text> {currentAsset.criticality}
-          </Text>
-          <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Remaining life:</Text> {currentAsset.remaining_life_years || 0} years
+            <Text style={{ fontWeight: '700' }}>Serial number:</Text> {currentAsset.serial_number || 'Not set'}
           </Text>
         </View>
 
         <SectionDivider />
 
-        <SectionHeading title="Lifecycle and cost" />
+        <SectionHeading title="Asset Financial & Lifecycle Data" />
 
         <View style={{ gap: 6 }}>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Purchase date:</Text>{' '}
+            <Text style={{ fontWeight: '700' }}>Purchase / install date:</Text>{' '}
             {currentAsset.purchase_date ? formatDateDDMMYYYY(currentAsset.purchase_date) : 'Not set'}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Purchase cost:</Text> ${currentAsset.purchase_cost.toLocaleString()}
+            <Text style={{ fontWeight: '700' }}>Purchase cost:</Text>{' '}
+            {typeof currentAsset.purchase_cost === 'number' ? `$${currentAsset.purchase_cost.toLocaleString()}` : 'Not set'}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Replacement cost:</Text> ${currentAsset.replacement_cost.toLocaleString()}
+            <Text style={{ fontWeight: '700' }}>Replacement cost:</Text>{' '}
+            {typeof currentAsset.replacement_cost === 'number'
+              ? `$${currentAsset.replacement_cost.toLocaleString()}`
+              : 'Not set'}
           </Text>
           <Text style={t.text.caption}>
             <Text style={{ fontWeight: '700' }}>Warranty expiry:</Text>{' '}
             {currentAsset.warranty_expiry ? formatDateDDMMYYYY(currentAsset.warranty_expiry) : 'Not set'}
           </Text>
-        </View>
-
-        <SectionDivider />
-
-        <SectionHeading title="Service history" />
-
-        <View style={{ gap: 6 }}>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Last serviced:</Text>{' '}
-            {currentAsset.last_serviced_date ? formatDateDDMMYYYY(currentAsset.last_serviced_date) : 'Not set'}
+            <Text style={{ fontWeight: '700' }}>Criticality:</Text> {currentAsset.criticality || 'Not set'}
           </Text>
           <Text style={t.text.caption}>
-            <Text style={{ fontWeight: '700' }}>Next service:</Text>{' '}
-            {currentAsset.next_service_date ? formatDateDDMMYYYY(currentAsset.next_service_date) : 'Not set'}
+            <Text style={{ fontWeight: '700' }}>Inspection frequency:</Text> {currentAsset.inspection_frequency || 'Not set'}
+          </Text>
+          <Text style={t.text.caption}>
+            <Text style={{ fontWeight: '700' }}>Status:</Text> {currentAsset.status}
           </Text>
         </View>
 
         <SectionDivider />
 
-        <SectionHeading title="Notes" />
-        <Text style={t.text.caption}>{currentAsset.notes || 'No notes.'}</Text>
+        <SectionHeading title="Asset Photos" />
 
-        <SectionDivider />
-
-        <SectionHeading title="Condition reports" />
-
-        <Text style={[t.text.caption, { marginTop: -6, marginBottom: t.spacing.md }]}>
-          Historical condition versus expected depreciation from purchase year to projected end-of-life.
-        </Text>
-
-        {reportRows.length === 0 ? (
-          <View
-            style={{
-              borderWidth: 1,
-              borderColor: t.colors.border.subtle,
-              borderRadius: t.radius.lg,
-              backgroundColor: t.colors.card.surface,
-              padding: t.spacing.md,
-            }}
-          >
-            <Text style={t.text.caption}>No condition reports are associated with this asset yet.</Text>
-          </View>
-        ) : (
-          <>
-            <View
-              style={{
-                borderWidth: 1,
-                borderColor: t.colors.border.subtle,
-                borderRadius: t.radius.lg,
-                backgroundColor: t.colors.card.surface,
-                padding: t.spacing.md,
-              }}
-            >
-              <Text style={[t.text.caption, { fontWeight: '700', marginBottom: t.spacing.sm }]}>
-                Condition trend graph
+        {currentAsset.asset_photo_urls && currentAsset.asset_photo_urls.length > 0 ? (
+          <View style={{ gap: 6 }}>
+            {currentAsset.asset_photo_urls.map((url, index) => (
+              <Text key={`${url}-${index}`} style={t.text.caption}>
+                Photo {index + 1}: {url}
               </Text>
-
-              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: t.spacing.sm }}>
-                {reportRows.map((row) => {
-                  const observedHeight = Math.max(8, row.observedScore * 18);
-                  const expectedHeight = Math.max(8, row.expectedScore * 18);
-
-                  return (
-                    <View key={row.id} style={{ flex: 1, alignItems: 'center' }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 120 }}>
-                        <View
-                          style={{
-                            width: 12,
-                            height: observedHeight,
-                            borderRadius: 6,
-                            backgroundColor: '#2F5B45',
-                          }}
-                        />
-                        <View
-                          style={{
-                            width: 12,
-                            height: expectedHeight,
-                            borderRadius: 6,
-                            backgroundColor: '#9AA49A',
-                          }}
-                        />
-                      </View>
-
-                      <Text style={[t.text.caption, { marginTop: 6, fontSize: 11 }]}>
-                        {formatDateDDMMYYYY(row.audit_date)}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: t.spacing.md, marginTop: t.spacing.sm }}>
-                <Text style={t.text.caption}>■ Observed</Text>
-                <Text style={t.text.caption}>■ Expected</Text>
-              </View>
-            </View>
-
-            <View style={{ height: t.spacing.lg }} />
-
-            <View
-              style={{
-                borderWidth: 1,
-                borderColor: t.colors.border.subtle,
-                borderRadius: t.radius.lg,
-                overflow: 'hidden',
-                backgroundColor: t.colors.card.surface,
-              }}
-            >
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingHorizontal: t.spacing.md,
-                  paddingVertical: t.spacing.sm,
-                  backgroundColor: t.colors.card.surfaceAlt,
-                  borderBottomWidth: 1,
-                  borderBottomColor: t.colors.border.subtle,
-                }}
-              >
-                <Text style={[t.text.caption, { flex: 1, fontWeight: '700' }]}>Date</Text>
-                <Text style={[t.text.caption, { flex: 1, fontWeight: '700' }]}>Reported by</Text>
-                <Text style={[t.text.caption, { flex: 1, fontWeight: '700' }]}>Observed</Text>
-                <Text style={[t.text.caption, { flex: 1, fontWeight: '700' }]}>Expected</Text>
-                <Text style={[t.text.caption, { flex: 1.1, fontWeight: '700' }]}>Report</Text>
-              </View>
-
-              {reportRows.map((row, idx) => {
-                const observedTone = toneForCondition(row.observedCondition);
-                const expectedTone = toneForCondition(row.expectedCondition);
-
-                return (
-                  <View
-                    key={`${row.id}-table`}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingHorizontal: t.spacing.md,
-                      paddingVertical: t.spacing.sm,
-                      borderBottomWidth: idx === reportRows.length - 1 ? 0 : 1,
-                      borderBottomColor: t.colors.border.subtle,
-                    }}
-                  >
-                    <Text style={[t.text.caption, { flex: 1 }]}>{formatDateDDMMYYYY(row.audit_date)}</Text>
-                    <Text style={[t.text.caption, { flex: 1 }]}>{row.inspector_name}</Text>
-
-                    <View style={{ flex: 1, alignItems: 'flex-start' }}>
-                      <View
-                        style={{
-                          borderRadius: 999,
-                          paddingHorizontal: 10,
-                          paddingVertical: 4,
-                          backgroundColor: observedTone.bg,
-                        }}
-                      >
-                        <Text style={{ color: observedTone.text, fontWeight: '700', fontSize: 12 }}>
-                          {row.observedCondition}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={{ flex: 1, alignItems: 'flex-start' }}>
-                      <View
-                        style={{
-                          borderRadius: 999,
-                          paddingHorizontal: 10,
-                          paddingVertical: 4,
-                          backgroundColor: expectedTone.bg,
-                        }}
-                      >
-                        <Text style={{ color: expectedTone.text, fontWeight: '700', fontSize: 12 }}>
-                          {row.expectedCondition}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={{ flex: 1.1, alignItems: 'flex-start' }}>
-                      <Pressable
-                        onPress={() => setSelectedReport(row)}
-                        style={({ pressed }) => [
-                          {
-                            minHeight: 30,
-                            borderRadius: 999,
-                            paddingHorizontal: 12,
-                            borderWidth: 1,
-                            borderColor: 'rgba(0,74,38,0.22)',
-                            backgroundColor: pressed ? 'rgba(0,74,38,0.08)' : '#FBF7F0',
-                            justifyContent: 'center',
-                          },
-                        ]}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#2F5B45' }}>View report</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </>
-        )}
-
-        <SectionDivider />
-
-        <View style={{ gap: t.spacing.md }}>
-          <Button
-            label={
-              activeAssignment
-                ? `Condition report assigned to ${activeAssignment.assignedTo.name}`
-                : 'Assign condition report'
-            }
-            variant="secondary"
-            onPress={() => router.push(`/admin/assets/assign-report/${currentAsset.id}` as any)}
-            disabled={Boolean(activeAssignment)}
-          />
-        </View>
-
-        <SectionDivider />
-
-        <SectionHeading title="Compliance checks" />
-
-        {loadingInsights ? (
-          <View style={{ minHeight: 100, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <ActivityIndicator size="small" color={t.colors.brand.forest} />
-            <Text style={t.text.caption}>Loading compliance checks...</Text>
-          </View>
-        ) : complianceChecks.length === 0 ? (
-          <Text style={t.text.caption}>No compliance checks logged for this asset yet.</Text>
-        ) : (
-          <View style={{ gap: t.spacing.sm }}>
-            {complianceChecks.map((check) => (
-              <View
-                key={check.id}
-                style={{
-                  borderWidth: 1,
-                  borderColor: t.colors.border.subtle,
-                  borderRadius: t.radius.md,
-                  backgroundColor: t.colors.card.surface,
-                  paddingHorizontal: t.spacing.md,
-                  paddingVertical: t.spacing.sm,
-                  gap: 4,
-                }}
-              >
-                <Text style={[t.text.body, { fontWeight: '700' }]}>{check.checkType || 'Compliance check'}</Text>
-                <Text style={t.text.caption}>
-                  Status: {check.status || 'Unknown'} · Checked by: {check.checkedBy || 'Unknown'}
-                </Text>
-                <Text style={t.text.caption}>
-                  Check date: {check.checkDate ? formatDateDDMMYYYY(check.checkDate) : 'Not set'} · Next review:{' '}
-                  {check.nextReviewDate ? formatDateDDMMYYYY(check.nextReviewDate) : 'Not set'}
-                </Text>
-                {check.notes ? <Text style={t.text.caption}>{check.notes}</Text> : null}
-              </View>
             ))}
           </View>
-        )}
-
-        <SectionDivider />
-
-        <SectionHeading title="CapEx forecast" />
-
-        {loadingInsights ? (
-          <View style={{ minHeight: 100, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <ActivityIndicator size="small" color={t.colors.brand.forest} />
-            <Text style={t.text.caption}>Loading capital forecast...</Text>
-          </View>
-        ) : capexForecast.length === 0 ? (
-          <Text style={t.text.caption}>No capital forecast entries linked to this asset yet.</Text>
         ) : (
-          <View style={{ gap: t.spacing.sm }}>
-            {capexForecast.map((entry) => (
-              <View
-                key={entry.id}
-                style={{
-                  borderWidth: 1,
-                  borderColor: t.colors.border.subtle,
-                  borderRadius: t.radius.md,
-                  backgroundColor: t.colors.card.surface,
-                  paddingHorizontal: t.spacing.md,
-                  paddingVertical: t.spacing.sm,
-                  gap: 4,
-                }}
-              >
-                <Text style={[t.text.body, { fontWeight: '700' }]}>{entry.item || 'CapEx item'}</Text>
-                <Text style={t.text.caption}>
-                  Priority: {entry.priority || 'Unspecified'} · Timeframe: {entry.timeframe || 'Unspecified'}
-                </Text>
-                <Text style={t.text.caption}>
-                  Estimated cost:{' '}
-                  {typeof entry.estimatedCost === 'number' ? `$${entry.estimatedCost.toLocaleString()}` : 'Not set'}
-                </Text>
-                <Text style={t.text.caption}>
-                  Identified: {entry.identifiedDate ? formatDateDDMMYYYY(entry.identifiedDate) : 'Not set'} · Target:{' '}
-                  {entry.targetCompletion ? formatDateDDMMYYYY(entry.targetCompletion) : 'Not set'}
-                </Text>
-                {entry.recommendedAction ? <Text style={t.text.caption}>{entry.recommendedAction}</Text> : null}
-                {entry.notes ? <Text style={t.text.caption}>{entry.notes}</Text> : null}
-              </View>
-            ))}
-          </View>
+          <Text style={t.text.caption}>No asset reference photos uploaded yet.</Text>
         )}
       </ScrollView>
 
       <AdminAppBottomNav />
-
-      <Modal visible={Boolean(selectedReport)} transparent animationType="fade" onRequestClose={() => setSelectedReport(null)}>
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.22)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingHorizontal: t.spacing.xl,
-          }}
-        >
-          <Pressable
-            onPress={() => setSelectedReport(null)}
-            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
-          />
-
-          <View
-            style={{
-              width: '100%',
-              maxWidth: 680,
-              borderWidth: 1,
-              borderColor: t.colors.border.subtle,
-              borderRadius: t.radius.lg,
-              backgroundColor: t.colors.card.surface,
-              padding: t.spacing.lg,
-              gap: t.spacing.md,
-            }}
-          >
-            <Text style={[t.text.title, { fontSize: 24, lineHeight: 30 }]}>Condition report</Text>
-            <Text style={t.text.caption}>
-              {selectedReport ? `${formatDateDDMMYYYY(selectedReport.audit_date)} · ${selectedReport.inspector_name}` : ''}
-            </Text>
-
-            <View
-              style={{
-                borderWidth: 1,
-                borderColor: t.colors.border.subtle,
-                borderRadius: t.radius.md,
-                backgroundColor: t.colors.card.surfaceAlt,
-                padding: t.spacing.md,
-                gap: t.spacing.sm,
-              }}
-            >
-              <Text style={[t.text.caption, { fontWeight: '700' }]}>Findings</Text>
-              <Text style={t.text.caption}>{selectedReport?.findings}</Text>
-              <Text style={[t.text.caption, { fontWeight: '700', marginTop: 6 }]}>Notes</Text>
-              <Text style={t.text.caption}>{selectedReport?.notes}</Text>
-            </View>
-
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-              <Button label="Close" variant="secondary" onPress={() => setSelectedReport(null)} />
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       <Modal
         visible={assetPendingDelete}
