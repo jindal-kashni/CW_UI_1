@@ -725,6 +725,7 @@ export async function saveAuditDraft(params: {
   assignmentId?: string;
   reportAssetId?: string;
   progressPct: number;
+  draftPayload?: Record<string, any>;
 }): Promise<boolean> {
   const reportAssetId = params.reportAssetId ?? params.assignmentId;
 
@@ -735,6 +736,8 @@ export async function saveAuditDraft(params: {
         .update({
           status: params.progressPct > 0 ? 'InProgress' : 'NotStarted',
           started_at: new Date().toISOString(),
+          draft_payload: params.draftPayload ?? {},
+          last_saved_at: new Date().toISOString(),
         })
         .eq('report_asset_id', reportAssetId)
         .select('report_id');
@@ -751,6 +754,8 @@ export async function saveAuditDraft(params: {
         .update({
           status: params.progressPct > 0 ? 'InProgress' : 'NotStarted',
           started_at: new Date().toISOString(),
+          draft_payload: params.draftPayload ?? {},
+          last_saved_at: new Date().toISOString(),
         })
         .eq('asset_id', params.assetId)
         .in('status', ['NotStarted', 'InProgress', 'Flagged'])
@@ -765,6 +770,26 @@ export async function saveAuditDraft(params: {
     return false;
   } catch {
     return false;
+  }
+}
+
+export async function fetchAuditDraft(reportAssetId: string): Promise<Record<string, any> | null> {
+  if (!reportAssetId) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('report_assets')
+      .select('draft_payload')
+      .eq('report_asset_id', reportAssetId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return (data as { draft_payload?: Record<string, any> }).draft_payload ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -888,5 +913,125 @@ export async function submitConditionReport(params: {
     };
   } catch (error: any) {
     return { ok: false, error: error?.message ?? 'Submission failed.' };
+  }
+}
+
+export type AuditorReportStatus = 'Assigned' | 'InProgress' | 'Completed';
+
+export type AuditorReportRecord = {
+  id: string;
+  title: string;
+  description: string;
+  summary: string;
+  locationId: string;
+  locationName: string;
+  assignedUserId: string;
+  status: AuditorReportStatus;
+  dueDate: string;
+  progressPct: number;
+  assetCount: number;
+  completedAssetCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function toAuditorReportStatus(status: ReportStatus, progressPct: number): AuditorReportStatus {
+  if (status === 'Completed' || progressPct >= 100) return 'Completed';
+  if (status === 'InProgress' || progressPct > 0) return 'InProgress';
+  return 'Assigned';
+}
+
+export async function fetchAuditorReports(): Promise<{
+  ok: boolean;
+  reports: AuditorReportRecord[];
+  error?: string;
+}> {
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userData.user?.id) {
+      return {
+        ok: false,
+        reports: [],
+        error: userError?.message ?? 'You must be signed in to view assigned reports.',
+      };
+    }
+
+    const userId = userData.user.id;
+
+    const { data: reportData, error: reportError } = await supabase
+      .from('reports')
+      .select(
+        'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
+      )
+      .eq('assigned_user_id', userId)
+      .neq('status', 'Cancelled')
+      .order('due_at', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: false });
+
+    if (reportError || !reportData) {
+      return {
+        ok: false,
+        reports: [],
+        error: reportError?.message ?? 'Could not load assigned reports.',
+      };
+    }
+
+    const reports = reportData as unknown as ReportRow[];
+    const reportIds = reports.map((report) => report.report_id);
+
+    if (reportIds.length === 0) {
+      return { ok: true, reports: [] };
+    }
+
+    const { data: reportAssetData, error: reportAssetError } = await supabase
+      .from('report_assets')
+      .select(
+        'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+      )
+      .in('report_id', reportIds);
+
+    if (reportAssetError) {
+      return {
+        ok: false,
+        reports: [],
+        error: reportAssetError.message,
+      };
+    }
+
+    const reportAssets = (reportAssetData ?? []) as unknown as ReportAssetRow[];
+
+    return {
+      ok: true,
+      reports: reports.map((report) => {
+        const assets = reportAssets.filter((asset) => asset.report_id === report.report_id);
+        const assetCount = assets.length;
+        const completedAssetCount = assets.filter((asset) => asset.status === 'Completed').length;
+        const progressPct = asNumber(report.progress_pct, calculateProgress(assets));
+
+        return {
+          id: report.report_id,
+          title: report.title,
+          description: asString(report.description),
+          summary: asString(report.summary),
+          locationId: asString(report.location_id),
+          locationName: '',
+          assignedUserId: asString(report.assigned_user_id),
+          status: toAuditorReportStatus(report.status, progressPct),
+          dueDate: dateOnly(report.due_at),
+          progressPct,
+          assetCount,
+          completedAssetCount,
+          createdAt: report.created_at,
+          updatedAt: report.updated_at,
+        };
+      }),
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      reports: [],
+      error: error?.message ?? 'Could not load assigned reports.',
+    };
   }
 }
