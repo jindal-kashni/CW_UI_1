@@ -9,7 +9,7 @@ import { getAuditorSettingsDirty, setAuditorSettingsDirty } from '@/src/state/au
 /** Auditor workspace tab bar only (separate from admin app). */
 const AUDITOR_BASE = '/audit' as const;
 const items = [
-  { key: 'audits', label: 'Your Reports', icon: 'check-square-o', href: `${AUDITOR_BASE}/history` },
+  { key: 'audits', label: 'Your Reports', icon: 'check-square-o', href: `${AUDITOR_BASE}/reports` },
   { key: 'assets', label: 'Assets', icon: 'th-large', href: `${AUDITOR_BASE}/assets` },
   { key: 'settings', label: 'Settings', icon: 'cog', href: `${AUDITOR_BASE}/settings` },
 ] as const;
@@ -20,6 +20,8 @@ function isActive(pathname: string, key: 'audits' | 'assets' | 'settings') {
   }
   if (key === 'audits') {
     return (
+      pathname === '/audit/reports' ||
+      pathname.startsWith('/audit/reports/') ||
       pathname === '/audit/history' ||
       pathname.startsWith('/audit/history/') ||
       pathname.startsWith('/audit/report/') ||

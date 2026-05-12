@@ -65,13 +65,15 @@ type ReportAssetRow = {
   due_at: string | null;
 };
 
-type AssetLookupRow = {
+type AssetLookupRow = Record<string, any> & {
   asset_id: string;
-  asset_code: string | null;
-  name: string | null;
-  location_id: string | null;
-  room_id: string | null;
-  dept_id: string | null;
+  asset_code?: string | null;
+  name?: string | null;
+  location_id?: string | null;
+  room_id?: string | null;
+  dept_id?: string | null;
+  category?: string | null;
+  sub_category?: string | null;
 };
 
 type LocationLookupRow = {
@@ -83,9 +85,14 @@ type AssetLookup = {
   id: string;
   code: string;
   name: string;
+  category: string;
+  subCategory: string;
   locationId: string;
+  locationName: string;
   roomId: string;
+  roomName: string;
   departmentId: string;
+  departmentName: string;
 };
 
 export type ReportAssetRecord = {
@@ -94,9 +101,14 @@ export type ReportAssetRecord = {
   assetId: string;
   assetCode: string;
   assetName: string;
+  category: string;
+  subCategory: string;
   locationId: string;
+  locationName: string;
   roomId: string;
+  roomName: string;
   departmentId: string;
+  departmentName: string;
   assignedUserId: string;
   dueDate: string;
   status: ReportAssetStatus;
@@ -146,9 +158,83 @@ function toAssetLookupMap(rows: AssetLookupRow[]): Record<string, AssetLookup> {
         id: row.asset_id,
         code: asString(row.asset_code),
         name: asString(row.name),
+        category: asString(row.category),
+        subCategory: asString(row.sub_category),
         locationId: asString(row.location_id),
+        locationName: '',
         roomId: asString(row.room_id),
+        roomName: '',
         departmentId: asString(row.dept_id),
+        departmentName: '',
+      },
+    ])
+  );
+}
+
+
+function lookupName(row: Record<string, any> | null | undefined): string {
+  if (!row) return '';
+  return (
+    asString(row.name) ||
+    asString(row.location_name) ||
+    asString(row.room_name) ||
+    asString(row.department_name) ||
+    asString(row.dept_name) ||
+    asString(row.title) ||
+    asString(row.label)
+  );
+}
+
+async function fetchLookupNames(
+  tableName: 'location' | 'room' | 'department',
+  idColumn: 'location_id' | 'room_id' | 'dept_id',
+  ids: string[]
+): Promise<Record<string, string>> {
+  const cleanIds = unique(ids);
+  if (cleanIds.length === 0) return {};
+
+  try {
+    const { data, error } = await supabase.from(tableName).select('*').in(idColumn, cleanIds);
+
+    if (error || !data) {
+      if (error) console.log(`fetchLookupNames ${tableName} error:`, error.message);
+      return {};
+    }
+
+    return Object.fromEntries(
+      (data as Record<string, any>[]).map((row) => [asString(row[idColumn]), lookupName(row)])
+    );
+  } catch (error: any) {
+    console.log(`fetchLookupNames ${tableName} error:`, error?.message ?? error);
+    return {};
+  }
+}
+
+async function enrichAssetLookups(assetMap: Record<string, AssetLookup>) {
+  const locationNames = await fetchLookupNames(
+    'location',
+    'location_id',
+    Object.values(assetMap).map((asset) => asset.locationId)
+  );
+  const roomNames = await fetchLookupNames(
+    'room',
+    'room_id',
+    Object.values(assetMap).map((asset) => asset.roomId)
+  );
+  const departmentNames = await fetchLookupNames(
+    'department',
+    'dept_id',
+    Object.values(assetMap).map((asset) => asset.departmentId)
+  );
+
+  return Object.fromEntries(
+    Object.entries(assetMap).map(([assetId, asset]) => [
+      assetId,
+      {
+        ...asset,
+        locationName: locationNames[asset.locationId] ?? '',
+        roomName: roomNames[asset.roomId] ?? '',
+        departmentName: departmentNames[asset.departmentId] ?? '',
       },
     ])
   );
@@ -212,9 +298,14 @@ function reportAssetRowToRecord(row: ReportAssetRow, asset?: AssetLookup): Repor
     assetId: asString(row.asset_id),
     assetCode: asset?.code ?? '',
     assetName: asset?.name ?? 'Unknown asset',
+    category: asset?.category ?? '',
+    subCategory: asset?.subCategory ?? '',
     locationId: asset?.locationId ?? '',
+    locationName: asset?.locationName ?? '',
     roomId: asset?.roomId ?? '',
+    roomName: asset?.roomName ?? '',
     departmentId: asset?.departmentId ?? '',
+    departmentName: asset?.departmentName ?? '',
     assignedUserId: asString(row.assigned_user_id),
     dueDate: dateOnly(row.due_at),
     status: row.status,
@@ -249,7 +340,7 @@ async function fetchAssetsByIds(assetIds: string[]) {
   if (assetIds.length === 0) return {};
   const { data, error } = await supabase
     .from('asset')
-    .select('asset_id, asset_code, name, location_id, room_id, dept_id')
+    .select('*')
     .in('asset_id', assetIds);
 
   if (error || !data) {
@@ -257,7 +348,8 @@ async function fetchAssetsByIds(assetIds: string[]) {
     return {};
   }
 
-  return toAssetLookupMap(data as unknown as AssetLookupRow[]);
+  const assetMap = toAssetLookupMap(data as unknown as AssetLookupRow[]);
+  return enrichAssetLookups(assetMap);
 }
 
 async function fetchLocationDepartmentMap(locationIds: string[]) {
@@ -388,9 +480,14 @@ export async function fetchReportById(reportId: string): Promise<ReportDetailsRe
         id: asset.assetId,
         code: asset.assetCode,
         name: asset.assetName,
+        category: asset.category,
+        subCategory: asset.subCategory,
         locationId: asset.locationId,
+        locationName: asset.locationName,
         roomId: asset.roomId,
+        roomName: asset.roomName,
         departmentId: asset.departmentId,
+        departmentName: asset.departmentName,
       },
     ])
   );
@@ -1000,6 +1097,7 @@ export async function fetchAuditorReports(): Promise<{
     }
 
     const reportAssets = (reportAssetData ?? []) as unknown as ReportAssetRow[];
+    const locationNames = await fetchLookupNames('location', 'location_id', unique(reports.map((report) => report.location_id)));
 
     return {
       ok: true,
@@ -1015,7 +1113,7 @@ export async function fetchAuditorReports(): Promise<{
           description: asString(report.description),
           summary: asString(report.summary),
           locationId: asString(report.location_id),
-          locationName: '',
+          locationName: locationNames[asString(report.location_id)] ?? '',
           assignedUserId: asString(report.assigned_user_id),
           status: toAuditorReportStatus(report.status, progressPct),
           dueDate: dateOnly(report.due_at),
@@ -1032,6 +1130,124 @@ export async function fetchAuditorReports(): Promise<{
       ok: false,
       reports: [],
       error: error?.message ?? 'Could not load assigned reports.',
+    };
+  }
+}
+
+export type ReportAssetForAuditRecord = {
+  reportAssetId: string;
+  reportId: string;
+  reportTitle: string;
+  reportDescription: string;
+  reportSummary: string;
+  reportDueDate: string;
+  reportProgressPct: number;
+  assetId: string;
+  assetCode: string;
+  assetName: string;
+  category: string;
+  subCategory: string;
+  locationId: string;
+  locationName: string;
+  roomId: string;
+  roomName: string;
+  departmentId: string;
+  departmentName: string;
+  assignedUserId: string;
+  dueDate: string;
+  status: ReportAssetStatus;
+  notes: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export async function fetchReportAssetForAudit(reportAssetId: string): Promise<{
+  ok: boolean;
+  item?: ReportAssetForAuditRecord;
+  error?: string;
+}> {
+  if (!reportAssetId) {
+    return { ok: false, error: 'Report asset ID is required.' };
+  }
+
+  try {
+    const { data: reportAssetData, error: reportAssetError } = await supabase
+      .from('report_assets')
+      .select(
+        'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+      )
+      .eq('report_asset_id', reportAssetId)
+      .maybeSingle();
+
+    if (reportAssetError || !reportAssetData) {
+      return {
+        ok: false,
+        error: reportAssetError?.message ?? 'This assigned report asset could not be found.',
+      };
+    }
+
+    const reportAsset = reportAssetData as unknown as ReportAssetRow;
+
+    const [{ data: reportData, error: reportError }, assetMap] = await Promise.all([
+      supabase
+        .from('reports')
+        .select(
+          'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
+        )
+        .eq('report_id', reportAsset.report_id)
+        .maybeSingle(),
+      fetchAssetsByIds(unique([reportAsset.asset_id])),
+    ]);
+
+    if (reportError || !reportData) {
+      return {
+        ok: false,
+        error: reportError?.message ?? 'The parent report could not be found.',
+      };
+    }
+
+    const report = reportData as unknown as ReportRow;
+    const asset = assetMap[asString(reportAsset.asset_id)];
+
+    if (!asset) {
+      return { ok: false, error: 'The linked asset could not be found.' };
+    }
+
+    const progressPct = asNumber(report.progress_pct, 0);
+
+    return {
+      ok: true,
+      item: {
+        reportAssetId: reportAsset.report_asset_id,
+        reportId: reportAsset.report_id,
+        reportTitle: report.title,
+        reportDescription: asString(report.description),
+        reportSummary: asString(report.summary),
+        reportDueDate: dateOnly(report.due_at),
+        reportProgressPct: progressPct,
+        assetId: asset.id,
+        assetCode: asset.code,
+        assetName: asset.name,
+        category: asset.category,
+        subCategory: asset.subCategory,
+        locationId: asset.locationId,
+        locationName: asset.locationName,
+        roomId: asset.roomId,
+        roomName: asset.roomName,
+        departmentId: asset.departmentId,
+        departmentName: asset.departmentName,
+        assignedUserId: asString(reportAsset.assigned_user_id || report.assigned_user_id),
+        dueDate: dateOnly(reportAsset.due_at || report.due_at),
+        status: reportAsset.status,
+        notes: asString(reportAsset.notes),
+        startedAt: reportAsset.started_at ?? undefined,
+        completedAt: reportAsset.completed_at ?? undefined,
+      },
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      error: error?.message ?? 'Could not load this report asset.',
     };
   }
 }
