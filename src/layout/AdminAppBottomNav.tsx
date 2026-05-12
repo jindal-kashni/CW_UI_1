@@ -7,7 +7,7 @@ import { useTheme } from '@/src/theme';
 
 const items = [
   { key: 'dashboard', label: 'Dashboard', icon: 'tachometer', href: '/admin' },
-  { key: 'reports', label: 'Reports', icon: 'file-text-o', href: '/admin/reports/assign' },
+  { key: 'reports', label: 'Reports', icon: 'file-text-o', href: '/admin/reports' },
   { key: 'assets', label: 'Assets', icon: 'cubes', href: '/admin/assets' },
   { key: 'more', label: 'Admin', icon: 'sliders', href: '/admin/users' },
   { key: 'settings', label: 'Settings', icon: 'cog', href: '/admin/settings' },
@@ -15,10 +15,10 @@ const items = [
 
 function isActive(pathname: string, key: (typeof items)[number]['key']) {
   if (key === 'dashboard') return pathname === '/admin' || pathname === '/admin/index';
-  if (key === 'reports') return pathname.includes('/reports') || pathname.includes('/admin/reports');
+  if (key === 'reports') return pathname.includes('/admin/reports');
   if (key === 'assets') return pathname.includes('/assets') || pathname.includes('/admin/assets');
   if (key === 'settings') return pathname.includes('/settings');
-  if (key === 'more')
+  if (key === 'more') {
     return (
       pathname.includes('/more') ||
       pathname.includes('/admin/users') ||
@@ -29,6 +29,7 @@ function isActive(pathname: string, key: (typeof items)[number]['key']) {
       pathname.includes('/admin/sync-status') ||
       pathname.includes('/admin/reference-data')
     );
+  }
   return false;
 }
 
@@ -50,6 +51,7 @@ export function AdminAppBottomNav() {
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           {items.map((item) => {
             const active = isActive(pathname, item.key);
+
             return (
               <Pressable
                 key={item.key}
@@ -95,4 +97,3 @@ export function AdminAppBottomNav() {
     </SafeAreaView>
   );
 }
-

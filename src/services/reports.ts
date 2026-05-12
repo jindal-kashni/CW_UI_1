@@ -2,60 +2,67 @@ import { supabase } from '@/utils/supabase';
 import { type AdminReportRecord } from '@/src/data/admin';
 import type { AuditAssignment, AuditStatus } from '@/src/types/models';
 
-// audit_log holds completed condition reports (the historical record).
-// audit_assignment holds the work queue (todo / in-progress / draft).
+type ReportStatus = 'Draft' | 'Assigned' | 'InProgress' | 'Completed' | 'Cancelled';
+type ReportAssetStatus = 'NotStarted' | 'InProgress' | 'Completed' | 'Flagged' | 'Skipped';
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
 function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === 'number' ? value : fallback;
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function dateOnly(value: string | null | undefined, fallback?: string): string {
-  if (typeof value !== 'string' || !value) return fallback ?? '';
+function dateOnly(value: string | null | undefined, fallback = ''): string {
+  if (!value) return fallback;
   return value.length >= 10 ? value.slice(0, 10) : value;
 }
 
-const ASSIGNMENT_STATUSES: AuditStatus[] = ['Assigned', 'InProgress', 'DraftSaved', 'Submitted', 'Completed'];
-function safeAssignmentStatus(v: unknown): AuditStatus {
-  if (typeof v === 'string' && (ASSIGNMENT_STATUSES as string[]).includes(v)) {
-    return v as AuditStatus;
-  }
+function unique(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function mapReportStatusToAdminStatus(status: string): AdminReportRecord['status'] {
+  if (status === 'Completed') return 'Completed';
+  if (status === 'InProgress') return 'InProgress';
+  return 'ToDo';
+}
+
+function mapReportAssetStatusToAuditStatus(status: string): AuditStatus {
+  if (status === 'Completed') return 'Completed';
+  if (status === 'InProgress') return 'InProgress';
+  if (status === 'Skipped' || status === 'Flagged') return 'Submitted';
   return 'Assigned';
 }
 
-type AuditLogRow = {
-  audit_id: string;
+type ReportRow = {
+  report_id: string;
+  title: string;
   location_id: string | null;
-  room_id: string | null;
+  assigned_user_id: string | null;
+  created_by: string | null;
+  status: ReportStatus;
+  due_at: string | null;
+  progress_pct: number | null;
+  summary: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  description: string | null;
+};
+
+type ReportAssetRow = {
+  report_asset_id: string;
+  report_id: string;
   asset_id: string | null;
-  audit_date: string | null;
-  inspector_name: string | null;
-  findings: string | null;
-  photo_taken: boolean | null;
-  photo_reference: string | null;
+  status: ReportAssetStatus;
+  started_at: string | null;
+  completed_at: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
-};
-
-type AuditAssignmentRow = {
-  assignment_id: string;
-  title: string;
-  asset_id: string | null;
-  location_id: string | null;
-  room_id: string | null;
-  due_at: string | null;
-  status: string;
-  progress_pct: number | null;
   assigned_user_id: string | null;
-  created_by: string | null;
-  summary: string | null;
-  precincts: string[] | null;
-  created_at: string;
-  updated_at: string;
+  due_at: string | null;
 };
 
 type AssetLookupRow = {
@@ -67,7 +74,13 @@ type AssetLookupRow = {
   dept_id: string | null;
 };
 
+type LocationLookupRow = {
+  location_id: string;
+  dept_id: string | null;
+};
+
 type AssetLookup = {
+  id: string;
   code: string;
   name: string;
   locationId: string;
@@ -75,11 +88,62 @@ type AssetLookup = {
   departmentId: string;
 };
 
+export type ReportAssetRecord = {
+  id: string;
+  reportId: string;
+  assetId: string;
+  assetCode: string;
+  assetName: string;
+  locationId: string;
+  roomId: string;
+  departmentId: string;
+  assignedUserId: string;
+  dueDate: string;
+  status: ReportAssetStatus;
+  notes: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type ReportDetailsRecord = AdminReportRecord & {
+  description: string;
+  summary: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  rawStatus: ReportStatus;
+  assets: ReportAssetRecord[];
+};
+
+export type CreateReportWithAssetsParams = {
+  title: string;
+  description?: string;
+  summary?: string;
+  locationId?: string | null;
+  assignedUserId: string;
+  assetIds: string[];
+  dueAt?: string | null;
+  status?: ReportStatus;
+};
+
+export type UpdateReportParams = {
+  reportId: string;
+  title?: string;
+  description?: string | null;
+  summary?: string | null;
+  locationId?: string | null;
+  assignedUserId?: string | null;
+  dueAt?: string | null;
+  status?: ReportStatus;
+  assetIds?: string[];
+};
+
 function toAssetLookupMap(rows: AssetLookupRow[]): Record<string, AssetLookup> {
   return Object.fromEntries(
     rows.map((row) => [
       row.asset_id,
       {
+        id: row.asset_id,
         code: asString(row.asset_code),
         name: asString(row.name),
         locationId: asString(row.location_id),
@@ -90,257 +154,505 @@ function toAssetLookupMap(rows: AssetLookupRow[]): Record<string, AssetLookup> {
   );
 }
 
-function logRowToAdminReport(row: AuditLogRow, asset: AssetLookup | undefined): AdminReportRecord {
-  return {
-    id: row.audit_id,
-    title: asset?.name ? `Condition Report · ${asset.name}` : `Condition Report · ${asString(row.inspector_name) || 'Auditor'}`,
-    assetCode: asset?.code ?? '',
-    locationId: asset?.locationId || asString(row.location_id),
-    roomId: asset?.roomId || asString(row.room_id),
-    departmentId: asset?.departmentId ?? '',
-    assignedUserId: '',
-    status: 'Completed',
-    dueDate: dateOnly(row.audit_date) || dateOnly(row.created_at),
-    submittedAt: row.created_at,
-    progressPct: 100,
-    findings: asString(row.findings),
-    comments: asString(row.notes),
-    photoCount: row.photo_taken ? 1 : 0,
-  };
+function calculateProgress(reportAssets: ReportAssetRow[]) {
+  if (reportAssets.length === 0) return 0;
+  const completed = reportAssets.filter((item) => item.status === 'Completed').length;
+  return Math.round((completed / reportAssets.length) * 100);
 }
 
-function assignmentRowToAdminReport(row: AuditAssignmentRow, asset: AssetLookup | undefined): AdminReportRecord {
-  const status = safeAssignmentStatus(row.status);
-  const adminStatus =
-    status === 'Completed' || status === 'Submitted'
-      ? 'Completed'
-      : status === 'InProgress' || status === 'DraftSaved'
-        ? 'InProgress'
-        : 'ToDo';
+function makeAssetSummary(reportAssets: ReportAssetRow[], assetMap: Record<string, AssetLookup>) {
+  const codes = reportAssets
+    .map((item) => assetMap[asString(item.asset_id)]?.code)
+    .filter(Boolean);
+
+  if (codes.length === 0) return 'No assets assigned';
+  if (codes.length <= 3) return codes.join(', ');
+  return `${codes.slice(0, 3).join(', ')} +${codes.length - 3} more`;
+}
+
+function reportRowToAdminReport(
+  row: ReportRow,
+  reportAssets: ReportAssetRow[],
+  assetMap: Record<string, AssetLookup>,
+  locationDeptMap: Record<string, string>
+): AdminReportRecord {
+  const firstAsset = reportAssets
+    .map((item) => assetMap[asString(item.asset_id)])
+    .find(Boolean);
+
+  const progressPct = asNumber(row.progress_pct, calculateProgress(reportAssets));
+  const completedAssets = reportAssets.filter((item) => item.status === 'Completed').length;
+  const totalAssets = reportAssets.length;
+
   return {
-    id: row.assignment_id,
-    title: row.title || (asset?.name ? `Condition Report Task · ${asset.name}` : 'Condition Report Task'),
-    assetCode: asset?.code ?? '',
-    locationId: asset?.locationId || asString(row.location_id),
-    roomId: asset?.roomId || asString(row.room_id),
-    departmentId: asset?.departmentId ?? '',
+    id: row.report_id,
+    title: row.title,
+    assetCode: makeAssetSummary(reportAssets, assetMap),
+    locationId: asString(row.location_id) || firstAsset?.locationId || '',
+    roomId: firstAsset?.roomId ?? '',
+    departmentId:
+      firstAsset?.departmentId ||
+      locationDeptMap[asString(row.location_id)] ||
+      '',
     assignedUserId: asString(row.assigned_user_id),
-    status: adminStatus,
+    status: mapReportStatusToAdminStatus(row.status),
     dueDate: dateOnly(row.due_at),
-    progressPct: asNumber(row.progress_pct),
-    findings: '',
-    comments: asString(row.summary),
+    submittedAt: row.completed_at ? dateOnly(row.completed_at) : undefined,
+    progressPct,
+    findings: totalAssets > 0 ? `${completedAssets}/${totalAssets} assets completed` : 'No assets assigned',
+    comments: asString(row.summary || row.description),
     photoCount: 0,
   };
 }
 
-function assignmentRowToAuditAssignment(row: AuditAssignmentRow): AuditAssignment {
+function reportAssetRowToRecord(row: ReportAssetRow, asset?: AssetLookup): ReportAssetRecord {
   return {
-    id: row.assignment_id,
-    title: row.title,
-    dueAt: row.due_at ?? '',
-    locationScope: { precincts: row.precincts ?? [] },
-    locationId: asString(row.location_id) || undefined,
-    roomId: asString(row.room_id) || undefined,
+    id: row.report_asset_id,
+    reportId: row.report_id,
     assetId: asString(row.asset_id),
-    status: safeAssignmentStatus(row.status),
-    progressPct: asNumber(row.progress_pct),
+    assetCode: asset?.code ?? '',
+    assetName: asset?.name ?? 'Unknown asset',
+    locationId: asset?.locationId ?? '',
+    roomId: asset?.roomId ?? '',
+    departmentId: asset?.departmentId ?? '',
+    assignedUserId: asString(row.assigned_user_id),
+    dueDate: dateOnly(row.due_at),
+    status: row.status,
+    notes: asString(row.notes),
+    startedAt: row.started_at ?? undefined,
+    completedAt: row.completed_at ?? undefined,
+  };
+}
+
+function reportAssetRowToAuditAssignment(row: ReportAssetRow, asset?: AssetLookup, report?: ReportRow): AuditAssignment {
+  return {
+    id: row.report_asset_id,
+    title: report?.title || (asset?.name ? `Condition Report Task · ${asset.name}` : 'Condition Report Task'),
+    dueAt: row.due_at ?? report?.due_at ?? '',
+    locationScope: { precincts: [] },
+    locationId: asset?.locationId || report?.location_id || undefined,
+    roomId: asset?.roomId || undefined,
+    assetId: asString(row.asset_id),
+    status: mapReportAssetStatusToAuditStatus(row.status),
+    progressPct: row.status === 'Completed' ? 100 : row.status === 'InProgress' ? 50 : 0,
     assignedTo: {
-      id: asString(row.assigned_user_id) || 'unknown',
+      id: asString(row.assigned_user_id || report?.assigned_user_id) || 'unknown',
       name: 'Auditor',
       role: 'Auditor',
       org: 'Currumbin Wildlife Sanctuary',
     },
-    summary: asString(row.summary),
+    summary: asString(row.notes || report?.summary || report?.description),
   };
 }
 
+async function fetchAssetsByIds(assetIds: string[]) {
+  if (assetIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('asset')
+    .select('asset_id, asset_code, name, location_id, room_id, dept_id')
+    .in('asset_id', assetIds);
+
+  if (error || !data) {
+    if (error) console.log('fetchAssetsByIds error:', error.message);
+    return {};
+  }
+
+  return toAssetLookupMap(data as unknown as AssetLookupRow[]);
+}
+
+async function fetchLocationDepartmentMap(locationIds: string[]) {
+  if (locationIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('location')
+    .select('location_id, dept_id')
+    .in('location_id', locationIds);
+
+  if (error || !data) {
+    if (error) console.log('fetchLocationDepartmentMap error:', error.message);
+    return {};
+  }
+
+  return Object.fromEntries(
+    (data as unknown as LocationLookupRow[]).map((row) => [row.location_id, asString(row.dept_id)])
+  );
+}
+
+async function syncReportProgress(reportId: string) {
+  const { data, error } = await supabase
+    .from('report_assets')
+    .select('report_asset_id, status')
+    .eq('report_id', reportId);
+
+  if (error || !data) return;
+
+  const rows = data as unknown as Pick<ReportAssetRow, 'report_asset_id' | 'status'>[];
+  const total = rows.length;
+  const completed = rows.filter((row) => row.status === 'Completed').length;
+  const progress = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+  const update: Partial<ReportRow> = {
+    progress_pct: progress,
+    status: progress === 100 && total > 0 ? 'Completed' : progress > 0 ? 'InProgress' : 'Assigned',
+    completed_at: progress === 100 && total > 0 ? new Date().toISOString() : null,
+  };
+
+  await supabase.from('reports').update(update).eq('report_id', reportId);
+}
+
 export async function fetchAdminReports(): Promise<AdminReportRecord[]> {
-  const [logs, assignments] = await Promise.all([
-    supabase
-      .from('audit_log')
-      .select('audit_id, location_id, room_id, asset_id, audit_date, inspector_name, findings, photo_taken, photo_reference, notes, created_at, updated_at')
-      .order('created_at', { ascending: false })
-      .limit(100),
-    supabase
-      .from('audit_assignment')
-      .select('assignment_id, title, asset_id, location_id, room_id, due_at, status, progress_pct, assigned_user_id, created_by, summary, precincts, created_at, updated_at')
-      .order('created_at', { ascending: false })
-      .limit(100),
-  ]);
+  const { data: reportData, error: reportError } = await supabase
+    .from('reports')
+    .select(
+      'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
+    )
+    .order('created_at', { ascending: false })
+    .limit(200);
 
-  const assetIds = [
-    ...new Set(
-      [
-        ...((logs.data as AuditLogRow[] | null)?.map((row) => asString(row.asset_id)).filter(Boolean) ?? []),
-        ...((assignments.data as AuditAssignmentRow[] | null)
-          ?.map((row) => asString(row.asset_id))
-          .filter(Boolean) ?? []),
-      ].filter(Boolean)
-    ),
-  ];
-  let resolvedAssetLookup: Record<string, AssetLookup> = {};
-  if (assetIds.length > 0) {
-    const { data: assetsData } = await supabase
-      .from('asset')
-      .select('asset_id, asset_code, name, location_id, room_id, dept_id')
-      .in('asset_id', assetIds);
-    resolvedAssetLookup = toAssetLookupMap((assetsData as AssetLookupRow[] | null) ?? []);
+  if (reportError || !reportData) {
+    if (reportError) console.log('fetchAdminReports error:', reportError.message);
+    return [];
   }
 
-  const rows: AdminReportRecord[] = [];
-  if (!assignments.error && assignments.data) {
-    for (const row of assignments.data as unknown as AuditAssignmentRow[]) {
-      if (row.status !== 'Completed') {
-        const asset = resolvedAssetLookup[asString(row.asset_id)];
-        rows.push(assignmentRowToAdminReport(row, asset));
+  const reports = reportData as unknown as ReportRow[];
+  const reportIds = reports.map((row) => row.report_id);
+
+  const { data: reportAssetData, error: reportAssetError } = await supabase
+    .from('report_assets')
+    .select(
+      'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+    )
+    .in('report_id', reportIds);
+
+  if (reportAssetError) {
+    console.log('fetchAdminReports report_assets error:', reportAssetError.message);
+  }
+
+  const reportAssets = (reportAssetData ?? []) as unknown as ReportAssetRow[];
+  const assetMap = await fetchAssetsByIds(unique(reportAssets.map((row) => row.asset_id)));
+  const locationDeptMap = await fetchLocationDepartmentMap(unique(reports.map((row) => row.location_id)));
+
+  return reports.map((report) =>
+    reportRowToAdminReport(
+      report,
+      reportAssets.filter((asset) => asset.report_id === report.report_id),
+      assetMap,
+      locationDeptMap
+    )
+  );
+}
+
+export async function fetchReportAssets(reportId: string): Promise<ReportAssetRecord[]> {
+  if (!reportId) return [];
+
+  const { data, error } = await supabase
+    .from('report_assets')
+    .select(
+      'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+    )
+    .eq('report_id', reportId)
+    .order('created_at', { ascending: true });
+
+  if (error || !data) {
+    if (error) console.log('fetchReportAssets error:', error.message);
+    return [];
+  }
+
+  const rows = data as unknown as ReportAssetRow[];
+  const assetMap = await fetchAssetsByIds(unique(rows.map((row) => row.asset_id)));
+
+  return rows.map((row) => reportAssetRowToRecord(row, assetMap[asString(row.asset_id)]));
+}
+
+export async function fetchReportById(reportId: string): Promise<ReportDetailsRecord | null> {
+  if (!reportId) return null;
+
+  const { data, error } = await supabase
+    .from('reports')
+    .select(
+      'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
+    )
+    .eq('report_id', reportId)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) console.log('fetchReportById error:', error.message);
+    return null;
+  }
+
+  const report = data as unknown as ReportRow;
+  const assets = await fetchReportAssets(reportId);
+  const assetMap = Object.fromEntries(
+    assets.map((asset) => [
+      asset.assetId,
+      {
+        id: asset.assetId,
+        code: asset.assetCode,
+        name: asset.assetName,
+        locationId: asset.locationId,
+        roomId: asset.roomId,
+        departmentId: asset.departmentId,
+      },
+    ])
+  );
+  const locationDeptMap = await fetchLocationDepartmentMap(unique([report.location_id]));
+  const adminRecord = reportRowToAdminReport(
+    report,
+    assets.map((asset) => ({
+      report_asset_id: asset.id,
+      report_id: asset.reportId,
+      asset_id: asset.assetId,
+      status: asset.status,
+      started_at: asset.startedAt ?? null,
+      completed_at: asset.completedAt ?? null,
+      notes: asset.notes,
+      created_at: '',
+      updated_at: '',
+      assigned_user_id: asset.assignedUserId || null,
+      due_at: asset.dueDate || null,
+    })),
+    assetMap,
+    locationDeptMap
+  );
+
+  return {
+    ...adminRecord,
+    description: asString(report.description),
+    summary: asString(report.summary),
+    createdAt: report.created_at,
+    updatedAt: report.updated_at,
+    createdBy: asString(report.created_by),
+    rawStatus: report.status,
+    assets,
+  };
+}
+
+export async function createReportWithAssets(
+  params: CreateReportWithAssetsParams
+): Promise<{ ok: boolean; reportId?: string; error?: string }> {
+  const assetIds = unique(params.assetIds);
+
+  if (!params.title.trim()) return { ok: false, error: 'Report title is required.' };
+  if (!params.assignedUserId) return { ok: false, error: 'Please select an auditor.' };
+  if (assetIds.length === 0) return { ok: false, error: 'Select at least one asset.' };
+
+  try {
+    const { data: user } = await supabase.auth.getUser();
+    const createdBy = user.user?.id ?? null;
+
+    const { data: reportData, error: reportError } = await supabase
+      .from('reports')
+      .insert([
+        {
+          title: params.title.trim(),
+          description: params.description?.trim() || null,
+          summary: params.summary?.trim() || null,
+          location_id: params.locationId ?? null,
+          assigned_user_id: params.assignedUserId,
+          created_by: createdBy,
+          status: params.status ?? 'Assigned',
+          due_at: params.dueAt ?? null,
+          progress_pct: 0,
+        },
+      ])
+      .select('report_id')
+      .single();
+
+    if (reportError || !reportData) {
+      return { ok: false, error: reportError?.message ?? 'Could not create report.' };
+    }
+
+    const reportId = asString((reportData as { report_id?: string }).report_id);
+
+    const reportAssetRows = assetIds.map((assetId) => ({
+      report_id: reportId,
+      asset_id: assetId,
+      status: 'NotStarted' as ReportAssetStatus,
+      assigned_user_id: params.assignedUserId,
+      due_at: params.dueAt ?? null,
+    }));
+
+    const { error: assetError } = await supabase.from('report_assets').insert(reportAssetRows);
+
+    if (assetError) {
+      await supabase.from('reports').delete().eq('report_id', reportId);
+      return { ok: false, error: assetError.message };
+    }
+
+    return { ok: true, reportId };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? 'Could not create report.' };
+  }
+}
+
+export async function updateReport(params: UpdateReportParams): Promise<{ ok: boolean; error?: string }> {
+  if (!params.reportId) return { ok: false, error: 'Report ID is required.' };
+
+  try {
+    const update: Record<string, unknown> = {};
+
+    if (params.title !== undefined) update.title = params.title.trim();
+    if (params.description !== undefined) update.description = params.description?.trim() || null;
+    if (params.summary !== undefined) update.summary = params.summary?.trim() || null;
+    if (params.locationId !== undefined) update.location_id = params.locationId || null;
+    if (params.assignedUserId !== undefined) update.assigned_user_id = params.assignedUserId || null;
+    if (params.dueAt !== undefined) update.due_at = params.dueAt || null;
+    if (params.status !== undefined) update.status = params.status;
+
+    if (Object.keys(update).length > 0) {
+      const { error } = await supabase.from('reports').update(update).eq('report_id', params.reportId);
+      if (error) return { ok: false, error: error.message };
+    }
+
+    if (params.assetIds) {
+      const newAssetIds = unique(params.assetIds);
+
+      const { data: existingData, error: existingError } = await supabase
+        .from('report_assets')
+        .select('report_asset_id, asset_id, status')
+        .eq('report_id', params.reportId);
+
+      if (existingError) return { ok: false, error: existingError.message };
+
+      const existing = (existingData ?? []) as unknown as Pick<
+        ReportAssetRow,
+        'report_asset_id' | 'asset_id' | 'status'
+      >[];
+
+      const existingAssetIds = unique(existing.map((row) => row.asset_id));
+      const toAdd = newAssetIds.filter((id) => !existingAssetIds.includes(id));
+      const toRemove = existing.filter(
+        (row) => row.asset_id && !newAssetIds.includes(row.asset_id) && row.status !== 'Completed'
+      );
+
+      if (toAdd.length > 0) {
+        const { error: addError } = await supabase.from('report_assets').insert(
+          toAdd.map((assetId) => ({
+            report_id: params.reportId,
+            asset_id: assetId,
+            status: 'NotStarted' as ReportAssetStatus,
+            assigned_user_id: params.assignedUserId,
+            due_at: params.dueAt ?? null,
+          }))
+        );
+        if (addError) return { ok: false, error: addError.message };
       }
+
+      if (toRemove.length > 0) {
+        const { error: removeError } = await supabase
+          .from('report_assets')
+          .delete()
+          .in(
+            'report_asset_id',
+            toRemove.map((row) => row.report_asset_id)
+          );
+        if (removeError) return { ok: false, error: removeError.message };
+      }
+
+      await syncReportProgress(params.reportId);
     }
+
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? 'Could not update report.' };
   }
-  if (!logs.error && logs.data) {
-    for (const row of logs.data as unknown as AuditLogRow[]) {
-      const asset = resolvedAssetLookup[asString(row.asset_id)];
-      rows.push(logRowToAdminReport(row, asset));
+}
+
+export async function deleteReport(reportId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!reportId) return { ok: false, error: 'Report ID is required.' };
+
+  const { error } = await supabase.from('reports').delete().eq('report_id', reportId);
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true };
+}
+
+export async function reassignReport(params: {
+  reportId: string;
+  assignedUserId: string;
+  includeInProgress?: boolean;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!params.reportId) return { ok: false, error: 'Report ID is required.' };
+  if (!params.assignedUserId) return { ok: false, error: 'Auditor is required.' };
+
+  try {
+    const allowedStatuses = params.includeInProgress
+      ? ['NotStarted', 'InProgress', 'Flagged', 'Skipped']
+      : ['NotStarted', 'Flagged', 'Skipped'];
+
+    const { error: reportError } = await supabase
+      .from('reports')
+      .update({
+        assigned_user_id: params.assignedUserId,
+      })
+      .eq('report_id', params.reportId);
+
+    if (reportError) {
+      return { ok: false, error: reportError.message };
     }
+
+    const { error: assetError } = await supabase
+      .from('report_assets')
+      .update({
+        assigned_user_id: params.assignedUserId,
+      })
+      .eq('report_id', params.reportId)
+      .in('status', allowedStatuses);
+
+    if (assetError) {
+      return { ok: false, error: assetError.message };
+    }
+
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? 'Could not reassign report.' };
   }
-  return rows;
 }
 
 export async function fetchAuditAssignments(): Promise<AuditAssignment[]> {
-  const { data, error } = await supabase
-    .from('audit_assignment')
-    .select('assignment_id, title, asset_id, location_id, room_id, due_at, status, progress_pct, assigned_user_id, created_by, summary, precincts, created_at, updated_at')
+  const { data: reportAssetData, error: reportAssetError } = await supabase
+    .from('report_assets')
+    .select(
+      'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+    )
+    .neq('status', 'Completed')
     .order('due_at', { ascending: true });
-  if (error || !data) {
-    if (error) console.log('fetchAuditAssignments error:', error.message);
+
+  if (reportAssetError || !reportAssetData) {
+    if (reportAssetError) console.log('fetchAuditAssignments error:', reportAssetError.message);
     return [];
   }
-  return (data as unknown as AuditAssignmentRow[]).map(assignmentRowToAuditAssignment);
+
+  const reportAssets = reportAssetData as unknown as ReportAssetRow[];
+  const [assetMap, reportResult] = await Promise.all([
+    fetchAssetsByIds(unique(reportAssets.map((row) => row.asset_id))),
+    supabase
+      .from('reports')
+      .select(
+        'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
+      )
+      .in('report_id', unique(reportAssets.map((row) => row.report_id))),
+  ]);
+
+  const reports = Object.fromEntries(
+    (((reportResult.data ?? []) as unknown as ReportRow[]).map((row) => [row.report_id, row]))
+  );
+
+  return reportAssets.map((row) =>
+    reportAssetRowToAuditAssignment(row, assetMap[asString(row.asset_id)], reports[row.report_id])
+  );
 }
-
-// Submit a completed condition report to audit_log AND, if there is a matching
-// audit_assignment, mark it Completed.
-export async function submitConditionReport(params: {
-  assetId: string;
-  inspectorName?: string;
-  findings: string;
-  comments: string;
-  photoTaken?: boolean;
-  photoReference?: string | null;
-  assignmentId?: string;
-}): Promise<{ ok: boolean; auditId?: string; error?: string }> {
-  try {
-    const { data: assetRow, error: assetError } = await supabase
-      .from('asset')
-      .select('asset_id, location_id, room_id')
-      .eq('asset_id', params.assetId)
-      .maybeSingle();
-    if (assetError || !assetRow) {
-      return { ok: false, error: assetError?.message ?? 'Asset not found' };
-    }
-    if (!assetRow.location_id) {
-      return { ok: false, error: 'Asset has no location set; report requires location_id.' };
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const { data, error } = await supabase
-      .from('audit_log')
-      .insert([
-        {
-          location_id: assetRow.location_id,
-          room_id: assetRow.room_id,
-          asset_id: assetRow.asset_id,
-          audit_date: today,
-          inspector_name: params.inspectorName ?? 'Auditor',
-          findings: params.findings,
-          photo_taken: Boolean(params.photoTaken),
-          photo_reference: params.photoReference ?? null,
-          notes: params.comments,
-        },
-      ])
-      .select('audit_id')
-      .single();
-    if (error || !data) {
-      return { ok: false, error: error?.message ?? 'Insert failed' };
-    }
-
-    if (params.assignmentId) {
-      const { data: updated, error: assignmentError } = await supabase
-        .from('audit_assignment')
-        .update({ status: 'Completed', progress_pct: 100 })
-        .eq('assignment_id', params.assignmentId)
-        .select('assignment_id');
-      if (assignmentError || !updated || updated.length === 0) {
-        return {
-          ok: false,
-          error: assignmentError?.message ?? 'Could not close assignment after report submission.',
-        };
-      }
-    } else {
-      // Best-effort: close any open assignment matching this asset for the
-      // current user (based on RLS, only their own row will be writable).
-      const { error: assignmentError } = await supabase
-        .from('audit_assignment')
-        .update({ status: 'Completed', progress_pct: 100 })
-        .eq('asset_id', params.assetId)
-        .neq('status', 'Completed');
-      if (assignmentError) {
-        return { ok: false, error: assignmentError.message };
-      }
-    }
-    return { ok: true, auditId: data.audit_id as string };
-  } catch (error: any) {
-    return { ok: false, error: error?.message ?? 'Submission failed' };
-  }
-}
-
-// Save assignment progress as a draft. Updates the assignment row (auditor RLS
-// allows updating only their own).
-export async function saveAuditDraft(params: {
-  assetId?: string;
-  assignmentId?: string;
-  progressPct: number;
-}): Promise<boolean> {
-  try {
-    const update = { status: 'DraftSaved' as const, progress_pct: params.progressPct };
-    if (params.assignmentId) {
-      const { data, error } = await supabase
-        .from('audit_assignment')
-        .update(update)
-        .eq('assignment_id', params.assignmentId)
-        .select('assignment_id');
-      return !error && Boolean(data && data.length > 0);
-    }
-    if (params.assetId) {
-      const { data, error } = await supabase
-        .from('audit_assignment')
-        .update(update)
-        .eq('asset_id', params.assetId)
-        .in('status', ['Assigned', 'InProgress', 'DraftSaved'])
-        .select('assignment_id');
-      return !error && Boolean(data && data.length > 0);
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-type AssetAssignmentSeedRow = {
-  asset_id: string;
-  asset_code: string | null;
-  name: string | null;
-  location_id: string | null;
-  room_id: string | null;
-};
 
 export async function createAuditAssignmentsBulk(params: {
   assignedUserId: string;
   assetIds: string[];
   dueAt?: string;
-}): Promise<{ ok: boolean; created?: AuditAssignment[]; error?: string }> {
-  const ids = Array.from(new Set(params.assetIds.filter(Boolean)));
-  if (!params.assignedUserId || ids.length === 0) {
+  title?: string;
+  locationId?: string | null;
+  summary?: string;
+}): Promise<{ ok: boolean; created?: AuditAssignment[]; reportId?: string; error?: string }> {
+  const assetIds = unique(params.assetIds);
+
+  if (!params.assignedUserId || assetIds.length === 0) {
     return { ok: false, error: 'Select at least one asset and an assignee.' };
   }
 
@@ -350,78 +662,231 @@ export async function createAuditAssignmentsBulk(params: {
       .select('user_id, role')
       .eq('user_id', params.assignedUserId)
       .maybeSingle();
+
     if (assigneeError || !assignee) {
       return { ok: false, error: assigneeError?.message ?? 'Assignee not found.' };
     }
+
     if (asString((assignee as Record<string, unknown>).role) !== 'Auditor') {
       return { ok: false, error: 'You can only assign reports to users with Auditor role.' };
     }
 
-    const { data: assetsData, error: assetsError } = await supabase
-      .from('asset')
-      .select('asset_id, asset_code, name, location_id, room_id')
-      .in('asset_id', ids);
-    if (assetsError || !assetsData || assetsData.length === 0) {
-      return { ok: false, error: assetsError?.message ?? 'Could not load selected assets.' };
-    }
+    const assetMap = await fetchAssetsByIds(assetIds);
+    const firstAsset = assetMap[assetIds[0]];
 
-    const dueAt =
-      params.dueAt ??
-      (() => {
-        const due = new Date();
-        due.setDate(due.getDate() + 7);
-        return due.toISOString();
-      })();
-
-    const rows = (assetsData as unknown as AssetAssignmentSeedRow[]).map((asset) => ({
-      title: `Condition Report Task · ${asString(asset.asset_code) || 'Asset'}`,
-      asset_id: asset.asset_id,
-      location_id: asset.location_id,
-      room_id: asset.room_id,
-      due_at: dueAt,
+    const result = await createReportWithAssets({
+      title: params.title || `Condition Report · ${assetIds.length} asset${assetIds.length === 1 ? '' : 's'}`,
+      summary: params.summary || `Condition report assigned for ${assetIds.length} selected asset${assetIds.length === 1 ? '' : 's'}.`,
+      description: params.summary || undefined,
+      locationId: params.locationId ?? firstAsset?.locationId ?? null,
+      assignedUserId: params.assignedUserId,
+      assetIds,
+      dueAt: params.dueAt,
       status: 'Assigned',
-      progress_pct: 0,
-      assigned_user_id: params.assignedUserId,
-      summary: `Condition report for ${asString(asset.name) || 'asset'} (${asString(asset.asset_code)}). Assigned by admin.`,
-      precincts: [] as string[],
-    }));
+    });
 
-    const { data, error } = await supabase
-      .from('audit_assignment')
-      .insert(rows)
-      .select(
-        'assignment_id, title, asset_id, location_id, room_id, due_at, status, progress_pct, assigned_user_id, created_by, summary, precincts, created_at, updated_at'
-      );
-    if (error || !data) {
-      return { ok: false, error: error?.message ?? 'Could not create assignments.' };
+    if (!result.ok || !result.reportId) {
+      return { ok: false, error: result.error ?? 'Could not create report.' };
     }
 
-    // Create in-app auditor notifications for newly assigned reports.
-    const alerts = (data as unknown as AuditAssignmentRow[]).map((assignment) => ({
-      title: `New audit assigned · ${asString(assignment.title) || 'Condition Report Task'}`,
-      body: `You have been assigned a new audit due ${dateOnly(assignment.due_at) || 'soon'}.`,
-      type: 'Report',
-      severity: 'Info',
-      status: 'Open',
-      kind: 'AssetFlag',
-      read: false,
-      user_id: params.assignedUserId,
-      location_id: assignment.location_id,
-      asset_id: assignment.asset_id,
-      audit_id: assignment.assignment_id,
-    }));
-    if (alerts.length > 0) {
-      const { error: alertError } = await supabase.from('alert').insert(alerts);
-      if (alertError) {
-        return { ok: false, error: `Assignments created but notifications failed: ${alertError.message}` };
-      }
-    }
+    const created = await fetchAuditAssignments();
+    const createdForReport = created.filter((assignment) => {
+      return assetIds.includes(assignment.assetId);
+    });
+
+    await supabase.from('alert').insert([
+      {
+        title: 'New audit report assigned',
+        body: `You have been assigned a new audit report with ${assetIds.length} asset${assetIds.length === 1 ? '' : 's'}.`,
+        type: 'Report',
+        severity: 'Info',
+        status: 'Open',
+        kind: 'AssetFlag',
+        read: false,
+        user_id: params.assignedUserId,
+        location_id: params.locationId ?? firstAsset?.locationId ?? null,
+        asset_id: assetIds[0] ?? null,
+        audit_id: result.reportId,
+      },
+    ]);
 
     return {
       ok: true,
-      created: (data as unknown as AuditAssignmentRow[]).map(assignmentRowToAuditAssignment),
+      reportId: result.reportId,
+      created: createdForReport.length > 0 ? createdForReport : created,
     };
   } catch (error: any) {
-    return { ok: false, error: error?.message ?? 'Bulk assignment failed.' };
+    return { ok: false, error: error?.message ?? 'Bulk report assignment failed.' };
+  }
+}
+
+export async function saveAuditDraft(params: {
+  assetId?: string;
+  assignmentId?: string;
+  reportAssetId?: string;
+  progressPct: number;
+}): Promise<boolean> {
+  const reportAssetId = params.reportAssetId ?? params.assignmentId;
+
+  try {
+    if (reportAssetId) {
+      const { data, error } = await supabase
+        .from('report_assets')
+        .update({
+          status: params.progressPct > 0 ? 'InProgress' : 'NotStarted',
+          started_at: new Date().toISOString(),
+        })
+        .eq('report_asset_id', reportAssetId)
+        .select('report_id');
+
+      if (error || !data || data.length === 0) return false;
+
+      await syncReportProgress(asString((data[0] as { report_id?: string }).report_id));
+      return true;
+    }
+
+    if (params.assetId) {
+      const { data, error } = await supabase
+        .from('report_assets')
+        .update({
+          status: params.progressPct > 0 ? 'InProgress' : 'NotStarted',
+          started_at: new Date().toISOString(),
+        })
+        .eq('asset_id', params.assetId)
+        .in('status', ['NotStarted', 'InProgress', 'Flagged'])
+        .select('report_id');
+
+      if (error || !data || data.length === 0) return false;
+
+      await syncReportProgress(asString((data[0] as { report_id?: string }).report_id));
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function submitConditionReport(params: {
+  assetId: string;
+  inspectorName?: string;
+  findings: string;
+  comments: string;
+  photoTaken?: boolean;
+  photoReference?: string | null;
+  assignmentId?: string;
+  reportAssetId?: string;
+  conditionRating?: number;
+  expectedRemainingLifeYears?: number | null;
+  operationalStatus?: 'Operational' | 'Partially Operational' | 'Not Operational' | 'Not Inspected';
+  maintenanceRequired?: boolean;
+  replacementRequired?: boolean;
+  priorityLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
+  safetyConcern?: boolean;
+  criticalAlert?: boolean;
+  recommendedAction?: string | null;
+  estimatedMaintenanceCost?: number | null;
+  estimatedReplacementCost?: number | null;
+}): Promise<{ ok: boolean; auditId?: string; error?: string }> {
+  const reportAssetId = params.reportAssetId ?? params.assignmentId;
+
+  try {
+    let reportAsset: ReportAssetRow | null = null;
+
+    if (reportAssetId) {
+      const { data, error } = await supabase
+        .from('report_assets')
+        .select(
+          'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+        )
+        .eq('report_asset_id', reportAssetId)
+        .maybeSingle();
+
+      if (error || !data) {
+        return { ok: false, error: error?.message ?? 'Report asset assignment not found.' };
+      }
+
+      reportAsset = data as unknown as ReportAssetRow;
+    } else {
+      const { data, error } = await supabase
+        .from('report_assets')
+        .select(
+          'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+        )
+        .eq('asset_id', params.assetId)
+        .in('status', ['NotStarted', 'InProgress', 'Flagged'])
+        .order('due_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) {
+        return { ok: false, error: error?.message ?? 'No active report asset assignment found.' };
+      }
+
+      reportAsset = data as unknown as ReportAssetRow;
+    }
+
+    const { data: user } = await supabase.auth.getUser();
+    const completedBy = user.user?.id ?? null;
+
+    const photoUrls =
+      params.photoReference || params.photoTaken
+        ? [params.photoReference || 'Photo attached']
+        : null;
+
+    const { data: auditData, error: auditError } = await supabase
+      .from('asset_audit_reports')
+      .insert([
+        {
+          report_id: reportAsset.report_id,
+          report_asset_id: reportAsset.report_asset_id,
+          asset_id: params.assetId || reportAsset.asset_id,
+          completed_by: completedBy,
+          completed_at: new Date().toISOString(),
+          condition_rating: params.conditionRating ?? 3,
+          expected_remaining_life_years: params.expectedRemainingLifeYears ?? null,
+          operational_status: params.operationalStatus ?? 'Operational',
+          maintenance_required: Boolean(params.maintenanceRequired),
+          replacement_required: Boolean(params.replacementRequired),
+          priority_level: params.priorityLevel ?? 'Medium',
+          safety_concern: Boolean(params.safetyConcern),
+          critical_alert: Boolean(params.criticalAlert),
+          general_notes: params.comments,
+          issue_description: params.findings,
+          recommended_action: params.recommendedAction ?? null,
+          estimated_maintenance_cost: params.estimatedMaintenanceCost ?? null,
+          estimated_replacement_cost: params.estimatedReplacementCost ?? null,
+          photo_urls: photoUrls,
+        },
+      ])
+      .select('asset_audit_report_id')
+      .single();
+
+    if (auditError || !auditData) {
+      return { ok: false, error: auditError?.message ?? 'Audit report submission failed.' };
+    }
+
+    const { error: assignmentError } = await supabase
+      .from('report_assets')
+      .update({
+        status: 'Completed',
+        completed_at: new Date().toISOString(),
+        notes: params.comments,
+      })
+      .eq('report_asset_id', reportAsset.report_asset_id);
+
+    if (assignmentError) {
+      return { ok: false, error: assignmentError.message };
+    }
+
+    await syncReportProgress(reportAsset.report_id);
+
+    return {
+      ok: true,
+      auditId: asString((auditData as { asset_audit_report_id?: string }).asset_audit_report_id),
+    };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? 'Submission failed.' };
   }
 }
