@@ -2,6 +2,7 @@ import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { router, useFocusEffect } from 'expo-router';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+
 import { SectionCard } from '@/src/components';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
@@ -25,7 +26,7 @@ function dueDays(value: string) {
 }
 
 function statusTone(status: AuditorReportRecord['status']) {
-  if (status === 'Completed') return { bg: 'rgba(47,107,75,0.12)', text: '#1F563D', label: 'Completed' };
+  if (status === 'Completed') return { bg: 'rgba(47,107,75,0.12)', text: '#1F563D', label: 'Finalised' };
   if (status === 'InProgress') return { bg: 'rgba(182,141,61,0.16)', text: '#6A5421', label: 'In progress' };
   return { bg: 'rgba(82,117,151,0.16)', text: '#314F6B', label: 'To do' };
 }
@@ -52,6 +53,7 @@ export default function AuditorReportsIndexScreen() {
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [cacheNotice, setCacheNotice] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!auditorSettingsReady) return;
@@ -68,6 +70,7 @@ export default function AuditorReportsIndexScreen() {
     if (mode === 'initial') setLoading(true);
     if (mode === 'refresh') setRefreshing(true);
     setError(null);
+    setCacheNotice(null);
 
     const result = await fetchAuditorReports();
 
@@ -76,6 +79,9 @@ export default function AuditorReportsIndexScreen() {
       setError(result.error ?? 'Could not load assigned reports.');
     } else {
       setReports(result.reports);
+      if (result.fromCache) {
+        setCacheNotice('Offline mode: showing reports cached on this device. Changes will sync when you reconnect.');
+      }
     }
 
     setLoading(false);
@@ -104,7 +110,7 @@ export default function AuditorReportsIndexScreen() {
   const stats = [
     { label: 'To do', value: todoReports.length },
     { label: 'In progress', value: inProgressReports.length },
-    { label: 'Completed', value: completedReports.length },
+    { label: 'Finalised', value: completedReports.length },
   ];
 
   return (
@@ -125,6 +131,19 @@ export default function AuditorReportsIndexScreen() {
           <Text style={[t.text.title, { fontSize: 30, lineHeight: 36 }]}>Your Reports</Text>
           <Text style={[t.text.caption, { marginTop: 2 }]}>Open assigned condition reports and complete each asset audit.</Text>
         </View>
+
+        {cacheNotice ? (
+          <View
+            style={{
+              borderRadius: t.radius.md,
+              borderWidth: 1,
+              borderColor: 'rgba(182,141,61,0.28)',
+              backgroundColor: 'rgba(182,141,61,0.10)',
+              padding: t.spacing.md,
+            }}>
+            <Text style={[t.text.caption, { color: '#6A5421', fontWeight: '800' }]}>{cacheNotice}</Text>
+          </View>
+        ) : null}
 
         <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
           {stats.map((stat) => (
@@ -149,7 +168,7 @@ export default function AuditorReportsIndexScreen() {
           {[
             { key: 'todo', label: 'To Do', count: todoReports.length },
             { key: 'inprogress', label: 'In Progress', count: inProgressReports.length },
-            { key: 'completed', label: 'Completed', count: completedReports.length },
+            { key: 'completed', label: 'Finalised', count: completedReports.length },
           ].map((tab) => {
             const selected = activeTab === tab.key;
             return (
@@ -198,7 +217,7 @@ export default function AuditorReportsIndexScreen() {
                 ? 'There are no assigned reports waiting to be started.'
                 : activeTab === 'inprogress'
                   ? 'There are no reports currently in progress.'
-                  : 'There are no completed reports yet.'}
+                  : 'There are no finalised reports yet.'}
             </Text>
           </SectionCard>
         ) : (

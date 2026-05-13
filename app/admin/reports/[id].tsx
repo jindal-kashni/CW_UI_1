@@ -54,6 +54,14 @@ function displayStatus(status: string) {
   return status;
 }
 
+function workflowTone(status: string): 'good' | 'neutral' | 'warn' | 'bad' | 'info' {
+  if (status === 'Finalised') return 'good';
+  if (status === 'Ready to finalise') return 'warn';
+  if (status === 'In Progress') return 'info';
+  if (status === 'Cancelled') return 'bad';
+  return 'neutral';
+}
+
 function formatDate(value?: string | null) {
   if (!value) return 'Not recorded';
   return formatDateDDMMYYYY(value);
@@ -78,15 +86,6 @@ function conditionLabel(value: number | null | undefined) {
     5: '5 - Excellent',
   };
   return labels[value] ?? String(value);
-}
-
-function isImageReference(value: string) {
-  const clean = value.trim();
-  return /^https?:\/\//i.test(clean) || /^file:/i.test(clean) || /^data:image\//i.test(clean);
-}
-
-function isOpenableUrl(value: string) {
-  return /^https?:\/\//i.test(value.trim());
 }
 
 function FlagPill({
@@ -170,47 +169,50 @@ function FieldLine({
 }
 
 function AuditPhotoTile({
-  photo,
+  uri,
   index,
 }: {
-  photo: string;
+  uri: string;
   index: number;
 }) {
   const t = useTheme();
-  const [imageFailed, setImageFailed] = React.useState(false);
+  const [failed, setFailed] = React.useState(false);
 
-  const cleanPhoto = photo.trim();
-  const canRenderImage = isImageReference(cleanPhoto) && !imageFailed;
-  const canOpenOriginal = isOpenableUrl(cleanPhoto);
-
-  const openOriginal = async () => {
-    if (!canOpenOriginal) return;
+  const openPhoto = async () => {
+    if (!uri) return;
 
     try {
-      await Linking.openURL(cleanPhoto);
+      const canOpen = await Linking.canOpenURL(uri);
+      if (canOpen) {
+        await Linking.openURL(uri);
+      }
     } catch {
-      // Keep the UI quiet. The visible fallback still shows the reference if opening fails.
+      // Ignore link open failures. The preview/fallback still gives the admin the stored reference.
     }
   };
 
   return (
     <Pressable
-      onPress={openOriginal}
-      disabled={!canOpenOriginal}
-      style={{
+      onPress={openPhoto}
+      style={({ pressed }) => ({
         width: 150,
         borderWidth: 1,
         borderColor: t.colors.border.subtle,
         borderRadius: t.radius.md,
-        backgroundColor: t.colors.card.surfaceAlt,
         overflow: 'hidden',
-      }}>
-      {canRenderImage ? (
+        backgroundColor: t.colors.card.surfaceAlt,
+        opacity: pressed ? 0.82 : 1,
+      })}>
+      {!failed ? (
         <Image
-          source={{ uri: cleanPhoto }}
-          style={{ width: '100%', height: 110, backgroundColor: 'rgba(30,31,28,0.06)' }}
+          source={{ uri }}
           resizeMode="cover"
-          onError={() => setImageFailed(true)}
+          onError={() => setFailed(true)}
+          style={{
+            width: '100%',
+            height: 110,
+            backgroundColor: 'rgba(30,31,28,0.08)',
+          }}
         />
       ) : (
         <View
@@ -219,12 +221,11 @@ function AuditPhotoTile({
             padding: t.spacing.sm,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: 'rgba(30,31,28,0.06)',
-            gap: 4,
+            backgroundColor: 'rgba(30,31,28,0.08)',
           }}>
-          <Text style={[t.text.caption, { fontWeight: '700', textAlign: 'center' }]}>Photo {index + 1}</Text>
-          <Text style={[t.text.caption, { textAlign: 'center' }]} numberOfLines={3}>
-            {cleanPhoto || 'Photo reference unavailable'}
+          <Text style={[t.text.caption, { textAlign: 'center', fontWeight: '700' }]}>Preview unavailable</Text>
+          <Text style={[t.text.caption, { textAlign: 'center', marginTop: 4 }]} numberOfLines={2}>
+            Tap to open photo
           </Text>
         </View>
       )}
@@ -232,7 +233,7 @@ function AuditPhotoTile({
       <View style={{ padding: t.spacing.sm, gap: 2 }}>
         <Text style={[t.text.caption, { fontWeight: '700' }]}>Photo {index + 1}</Text>
         <Text style={t.text.caption} numberOfLines={1}>
-          {canOpenOriginal ? 'Tap to open original' : imageFailed ? 'Could not preview image' : 'Image reference'}
+          Open original
         </Text>
       </View>
     </Pressable>
@@ -362,9 +363,14 @@ function AssetAuditCard({
             {result.photoUrls.length > 0 ? (
               <View style={{ gap: t.spacing.sm }}>
                 <Text style={[t.text.caption, { fontWeight: '700' }]}>Audit photos</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    gap: t.spacing.sm,
+                  }}>
                   {result.photoUrls.map((photo, index) => (
-                    <AuditPhotoTile key={`${photo}-${index}`} photo={photo} index={index} />
+                    <AuditPhotoTile key={`${photo}-${index}`} uri={photo} index={index} />
                   ))}
                 </View>
               </View>
@@ -460,6 +466,12 @@ export default function AdminReportDetailPage() {
       return;
     }
 
+    if (report.rawStatus === 'Completed') {
+      setMessage('Finalised reports cannot be reassigned.');
+      setReassignModalOpen(false);
+      return;
+    }
+
     setReassigning(true);
     setMessage(null);
 
@@ -550,6 +562,21 @@ export default function AdminReportDetailPage() {
     return result.priorityLevel === 'Critical' || result.conditionRating === 1 || result.safetyConcern;
   }).length;
 
+  const totalAssets = report.assets.length;
+  const isFinalised = report.rawStatus === 'Completed';
+  const hasAnySyncedWork = completedAssets > 0 || submittedResults > 0 || report.assets.some((asset) => asset.status === 'InProgress');
+  const allAssetsSynced = totalAssets > 0 && completedAssets === totalAssets;
+  const readyToFinalise = !isFinalised && allAssetsSynced;
+  const workflowLabel = isFinalised
+    ? 'Finalised'
+    : readyToFinalise
+      ? 'Ready to finalise'
+      : report.rawStatus === 'Cancelled'
+        ? 'Cancelled'
+        : hasAnySyncedWork
+          ? 'In Progress'
+          : 'Assigned';
+
   const SectionHeading = ({ title, subtitle }: { title: string; subtitle?: string }) => (
     <View style={{ marginBottom: t.spacing.md, gap: 4 }}>
       <Text style={[t.text.title, { fontSize: 22, lineHeight: 28 }]}>{title}</Text>
@@ -585,20 +612,31 @@ export default function AdminReportDetailPage() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: t.spacing.md }}>
             <View style={{ flex: 1 }}>
               <Text style={[t.text.title, { fontSize: 26, lineHeight: 32 }]}>{report.title}</Text>
-              <Text style={[t.text.caption, { marginTop: 4 }]}> 
+              <Text style={[t.text.caption, { marginTop: 4 }]}>              
                 {locationName} · {departmentName}
               </Text>
             </View>
 
-            <StatusBadge label={displayStatus(report.status)} tone={statusTone(report.rawStatus)} />
+            <StatusBadge label={workflowLabel} tone={workflowTone(workflowLabel)} />
           </View>
 
           <Text style={t.text.caption}>Assigned to: {userName}</Text>
           <Text style={t.text.caption}>Due date: {report.dueDate ? formatDateDDMMYYYY(report.dueDate) : 'No due date set'}</Text>
           <Text style={t.text.caption}>Progress: {report.progressPct}%</Text>
           <Text style={t.text.caption}>
-            Assets completed: {completedAssets}/{report.assets.length}
+            Assets completed/synced: {completedAssets}/{report.assets.length}
           </Text>
+          <Text style={t.text.caption}>
+            Submitted audit results: {submittedResults}/{report.assets.length}
+          </Text>
+          <Text style={t.text.caption}>
+            Report finalised: {isFinalised ? `Yes${report.submittedAt ? ` · ${formatDateDDMMYYYY(report.submittedAt)}` : ''}` : 'No'}
+          </Text>
+          {readyToFinalise ? (
+            <Text style={[t.text.caption, { color: '#8A5A00', fontWeight: '700' }]}>
+              All asset audits have synced, but the auditor has not finalised this report yet. Results may still be edited by the auditor.
+            </Text>
+          ) : null}
 
           {message ? <Text style={[t.text.caption, { color: '#2F5B45', fontWeight: '700' }]}>{message}</Text> : null}
         </View>
@@ -610,7 +648,18 @@ export default function AdminReportDetailPage() {
             gap: t.spacing.md,
             marginTop: t.spacing.lg,
           }}>
-          <Button label="Reassign report" variant="secondary" onPress={() => setReassignModalOpen(true)} />
+          <Button
+            label={isFinalised ? 'Reassignment locked' : 'Reassign report'}
+            variant="secondary"
+            disabled={isFinalised}
+            onPress={() => setReassignModalOpen(true)}
+          />
+          <Button
+            label={isFinalised ? 'Download final PDF (coming soon)' : 'Final PDF available after finalisation'}
+            variant="secondary"
+            disabled
+            onPress={() => {}}
+          />
           <Button label={deleting ? 'Deleting...' : 'Delete report'} variant="secondary" disabled={deleting} onPress={onDelete} />
         </View>
 
@@ -622,7 +671,10 @@ export default function AdminReportDetailPage() {
           <Text style={t.text.caption}>Summary: {report.summary || 'No summary provided.'}</Text>
           <Text style={t.text.caption}>Description: {report.description || 'No description provided.'}</Text>
           <Text style={t.text.caption}>Created: {formatDateDDMMYYYY(report.createdAt)}</Text>
-          {report.submittedAt ? <Text style={t.text.caption}>Completed: {formatDateDDMMYYYY(report.submittedAt)}</Text> : null}
+          {report.submittedAt ? <Text style={t.text.caption}>Finalised at: {formatDateDDMMYYYY(report.submittedAt)}</Text> : null}
+          <Text style={t.text.caption}>
+            Admin note: progress reflects synced database results only. Offline work completed on an auditor device becomes visible here after it syncs.
+          </Text>
         </View>
 
         <SectionDivider />
@@ -638,7 +690,13 @@ export default function AdminReportDetailPage() {
             flexWrap: 'wrap',
             gap: t.spacing.md,
           }}>
-          <MetricCard label="Submitted results" value={`${submittedResults}/${report.assets.length}`} helper="Asset audit rows received" />
+          <MetricCard
+            label="Workflow state"
+            value={workflowLabel}
+            helper={isFinalised ? 'Report locked for auditor edits' : readyToFinalise ? 'Awaiting auditor finalisation' : 'Still active'}
+          />
+          <MetricCard label="Synced asset audits" value={`${completedAssets}/${report.assets.length}`} helper="report_assets completed" />
+          <MetricCard label="Submitted results" value={`${submittedResults}/${report.assets.length}`} helper="asset_audit_reports received" />
           <MetricCard label="Maintenance required" value={maintenanceRequired} />
           <MetricCard label="Replacement required" value={replacementRequired} />
           <MetricCard label="Safety concerns" value={safetyConcerns} />
@@ -710,6 +768,24 @@ export default function AdminReportDetailPage() {
                 This changes the assigned auditor for the report and all incomplete or in-progress report assets. Completed asset audit
                 results are preserved.
               </Text>
+              {hasAnySyncedWork ? (
+                <View
+                  style={{
+                    marginTop: t.spacing.sm,
+                    borderWidth: 1,
+                    borderColor: 'rgba(179,79,71,0.28)',
+                    borderRadius: t.radius.md,
+                    padding: t.spacing.md,
+                    backgroundColor: 'rgba(179,79,71,0.10)',
+                  }}>
+                  <Text style={[t.text.caption, { color: '#7A2E29', fontWeight: '700' }]}>
+                    Reassignment warning
+                  </Text>
+                  <Text style={[t.text.caption, { color: '#7A2E29', marginTop: 4 }]}>
+                    This report already has synced progress. If the current auditor has unsynced offline work on their device, admin cannot see it until that auditor reconnects and syncs.
+                  </Text>
+                </View>
+              ) : null}
             </View>
 
             <View

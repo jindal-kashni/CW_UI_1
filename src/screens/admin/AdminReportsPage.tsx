@@ -305,9 +305,9 @@ export default function AdminReportsPage() {
                 style={({ pressed }) => [
                   {
                     flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingHorizontal: t.spacing.md,
-                    paddingVertical: t.spacing.md,
+                    alignItems: 'flex-start',
+                    paddingHorizontal: t.spacing.lg,
+                    paddingVertical: t.spacing.lg,
                     borderBottomWidth: idx === filtered.length - 1 ? 0 : 1,
                     borderBottomColor: t.colors.border.subtle,
                     backgroundColor: pressed ? 'rgba(31,59,44,0.04)' : 'transparent',
@@ -336,11 +336,11 @@ export default function AdminReportsPage() {
                   {report.dueDate ? formatDateDDMMYYYY(report.submittedAt ?? report.dueDate) : 'No due date'}
                 </Text>
 
-                <View style={{ flex: 1.2 }}>
+                <View style={{ flex: 1.6, minWidth: 0 }}>
                   <Text style={[t.text.caption, { fontWeight: '700', color: t.colors.brand.forest }]}>
                     {report.progressPct}%
                   </Text>
-                  <Text style={t.text.caption} numberOfLines={1}>
+                  <Text style={[t.text.caption, { lineHeight: 18, flexWrap: 'wrap' }]}>
                     {report.findings}
                   </Text>
                 </View>

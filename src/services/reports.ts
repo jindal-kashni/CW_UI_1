@@ -1,6 +1,23 @@
 import { supabase } from '@/utils/supabase';
 import { type AdminReportRecord } from '@/src/data/admin';
 import type { AuditAssignment, AuditStatus } from '@/src/types/models';
+import { uploadPhoto, saveAttachmentReference, type CapturedPhoto } from '@/src/services/photos';
+import {
+  getPendingReportAudits,
+  removePendingAuditSubmission,
+  savePendingAuditSubmission,
+  type PendingAuditPhoto,
+} from '@/src/services/auditPendingQueue';
+import {
+  cacheAuditorReports,
+  cacheReportDetail,
+  getCachedAuditorReports,
+  getCachedReportAssetForAudit,
+  getCachedReportDetail,
+  getCachedSubmittedAuditResult,
+  markCachedReportFinalised,
+  updateCachedReportAssetAfterSubmit,
+} from '@/src/services/auditOfflineCache';
 
 type ReportStatus = 'Draft' | 'Assigned' | 'InProgress' | 'Completed' | 'Cancelled';
 type ReportAssetStatus = 'NotStarted' | 'InProgress' | 'Completed' | 'Flagged' | 'Skipped';
@@ -77,6 +94,34 @@ function mapReportStatusToAdminStatus(status: string): AdminReportRecord['status
   if (status === 'Completed') return 'Completed';
   if (status === 'InProgress') return 'InProgress';
   return 'ToDo';
+}
+
+function getAdminReportWorkflowSummary(
+  reportStatus: string,
+  completedAssets: number,
+  totalAssets: number
+) {
+  if (totalAssets === 0) return 'No assets assigned';
+
+  const syncedLabel = `${completedAssets}/${totalAssets} asset audits synced`;
+
+  if (reportStatus === 'Completed') {
+    return `Finalised · ${syncedLabel}`;
+  }
+
+  if (reportStatus === 'Cancelled') {
+    return `Cancelled · ${syncedLabel}`;
+  }
+
+  if (completedAssets === totalAssets) {
+    return `Ready to finalise · ${syncedLabel}`;
+  }
+
+  if (completedAssets > 0 || reportStatus === 'InProgress') {
+    return `In progress · ${syncedLabel}`;
+  }
+
+  return `Assigned · ${syncedLabel}`;
 }
 
 function mapReportAssetStatusToAuditStatus(status: string): AuditStatus {
@@ -415,7 +460,7 @@ function reportRowToAdminReport(
     dueDate: dateOnly(row.due_at),
     submittedAt: row.completed_at ? dateOnly(row.completed_at) : undefined,
     progressPct,
-    findings: totalAssets > 0 ? `${completedAssets}/${totalAssets} assets completed` : 'No assets assigned',
+    findings: getAdminReportWorkflowSummary(row.status, completedAssets, totalAssets),
     comments: asString(row.summary || row.description),
     photoCount: 0,
   };
@@ -513,10 +558,21 @@ async function syncReportProgress(reportId: string) {
   const completed = rows.filter((row) => row.status === 'Completed').length;
   const progress = total === 0 ? 0 : Math.round((completed / total) * 100);
 
-  const update: Partial<ReportRow> = {
+  // Asset completion should update progress only.
+  // The parent report must not become Completed until the auditor explicitly finalises it.
+  const { data: reportData } = await supabase
+    .from('reports')
+    .select('status')
+    .eq('report_id', reportId)
+    .maybeSingle();
+
+  const currentReportStatus = asString((reportData as { status?: string } | null)?.status);
+  if (currentReportStatus === 'Completed' || currentReportStatus === 'Cancelled') return;
+
+  const update: Record<string, unknown> = {
     progress_pct: progress,
-    status: progress === 100 && total > 0 ? 'Completed' : progress > 0 ? 'InProgress' : 'Assigned',
-    completed_at: progress === 100 && total > 0 ? new Date().toISOString() : null,
+    status: progress > 0 ? 'InProgress' : 'Assigned',
+    completed_at: null,
   };
 
   await supabase.from('reports').update(update).eq('report_id', reportId);
@@ -577,7 +633,8 @@ export async function fetchReportAssets(reportId: string): Promise<ReportAssetRe
 
   if (error || !data) {
     if (error) console.log('fetchReportAssets error:', error.message);
-    return [];
+    const cached = await getCachedReportDetail(reportId);
+    return cached?.assets ?? [];
   }
 
   const rows = data as unknown as ReportAssetRow[];
@@ -594,69 +651,77 @@ export async function fetchReportAssets(reportId: string): Promise<ReportAssetRe
 export async function fetchReportById(reportId: string): Promise<ReportDetailsRecord | null> {
   if (!reportId) return null;
 
-  const { data, error } = await supabase
-    .from('reports')
-    .select(
-      'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
-    )
-    .eq('report_id', reportId)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from('reports')
+      .select(
+        'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
+      )
+      .eq('report_id', reportId)
+      .maybeSingle();
 
-  if (error || !data) {
-    if (error) console.log('fetchReportById error:', error.message);
-    return null;
+    if (error || !data) {
+      if (error) console.log('fetchReportById error:', error.message);
+      return await getCachedReportDetail(reportId);
+    }
+
+    const report = data as unknown as ReportRow;
+    const assets = await fetchReportAssets(reportId);
+    const assetMap = Object.fromEntries(
+      assets.map((asset) => [
+        asset.assetId,
+        {
+          id: asset.assetId,
+          code: asset.assetCode,
+          name: asset.assetName,
+          category: asset.category,
+          subCategory: asset.subCategory,
+          locationId: asset.locationId,
+          locationName: asset.locationName,
+          roomId: asset.roomId,
+          roomName: asset.roomName,
+          departmentId: asset.departmentId,
+          departmentName: asset.departmentName,
+        },
+      ])
+    );
+    const locationDeptMap = await fetchLocationDepartmentMap(unique([report.location_id]));
+    const adminRecord = reportRowToAdminReport(
+      report,
+      assets.map((asset) => ({
+        report_asset_id: asset.id,
+        report_id: asset.reportId,
+        asset_id: asset.assetId,
+        status: asset.status,
+        started_at: asset.startedAt ?? null,
+        completed_at: asset.completedAt ?? null,
+        notes: asset.notes,
+        created_at: '',
+        updated_at: '',
+        assigned_user_id: asset.assignedUserId || null,
+        due_at: asset.dueDate || null,
+      })),
+      assetMap,
+      locationDeptMap
+    );
+
+    const detail: ReportDetailsRecord = {
+      ...adminRecord,
+      description: asString(report.description),
+      summary: asString(report.summary),
+      createdAt: report.created_at,
+      updatedAt: report.updated_at,
+      createdBy: asString(report.created_by),
+      rawStatus: report.status,
+      assets,
+    };
+
+    await cacheReportDetail(detail);
+    return detail;
+  } catch (error: any) {
+    console.log('fetchReportById error:', error?.message ?? error);
+    return await getCachedReportDetail(reportId);
   }
-
-  const report = data as unknown as ReportRow;
-  const assets = await fetchReportAssets(reportId);
-  const assetMap = Object.fromEntries(
-    assets.map((asset) => [
-      asset.assetId,
-      {
-        id: asset.assetId,
-        code: asset.assetCode,
-        name: asset.assetName,
-        category: asset.category,
-        subCategory: asset.subCategory,
-        locationId: asset.locationId,
-        locationName: asset.locationName,
-        roomId: asset.roomId,
-        roomName: asset.roomName,
-        departmentId: asset.departmentId,
-        departmentName: asset.departmentName,
-      },
-    ])
-  );
-  const locationDeptMap = await fetchLocationDepartmentMap(unique([report.location_id]));
-  const adminRecord = reportRowToAdminReport(
-    report,
-    assets.map((asset) => ({
-      report_asset_id: asset.id,
-      report_id: asset.reportId,
-      asset_id: asset.assetId,
-      status: asset.status,
-      started_at: asset.startedAt ?? null,
-      completed_at: asset.completedAt ?? null,
-      notes: asset.notes,
-      created_at: '',
-      updated_at: '',
-      assigned_user_id: asset.assignedUserId || null,
-      due_at: asset.dueDate || null,
-    })),
-    assetMap,
-    locationDeptMap
-  );
-
-  return {
-    ...adminRecord,
-    description: asString(report.description),
-    summary: asString(report.summary),
-    createdAt: report.created_at,
-    updatedAt: report.updated_at,
-    createdBy: asString(report.created_by),
-    rawStatus: report.status,
-    assets,
-  };
 }
 
 export async function createReportWithAssets(
@@ -953,6 +1018,38 @@ export async function createAuditAssignmentsBulk(params: {
   }
 }
 
+
+async function fetchReportStatus(reportId: string): Promise<ReportStatus | null> {
+  if (!reportId) return null;
+
+  const { data, error } = await supabase
+    .from('reports')
+    .select('status')
+    .eq('report_id', reportId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return asString((data as { status?: string }).status) as ReportStatus;
+}
+
+function isFinalisedReportStatus(status: string | null | undefined) {
+  return status === 'Completed' || status === 'Cancelled';
+}
+
+function pendingPhotoToCapturedPhoto(photo: PendingAuditPhoto): CapturedPhoto {
+  return {
+    uri: photo.uri,
+    fileName: photo.fileName ?? undefined,
+    mimeType: photo.mimeType ?? undefined,
+    width: photo.width ?? undefined,
+    height: photo.height ?? undefined,
+  } as CapturedPhoto;
+}
+
+function isProbablyRemoteUrl(value: string) {
+  return value.startsWith('http://') || value.startsWith('https://');
+}
+
 export async function saveAuditDraft(params: {
   assetId?: string;
   assignmentId?: string;
@@ -964,20 +1061,39 @@ export async function saveAuditDraft(params: {
 
   try {
     if (reportAssetId) {
-      const { data, error } = await supabase
+      const { data: existing, error: existingError } = await supabase
+        .from('report_assets')
+        .select('report_asset_id, report_id, status')
+        .eq('report_asset_id', reportAssetId)
+        .maybeSingle();
+
+      if (existingError || !existing) return false;
+
+      const reportId = asString((existing as { report_id?: string }).report_id);
+      const currentStatus = asString((existing as { status?: string }).status) as ReportAssetStatus;
+      const reportStatus = await fetchReportStatus(reportId);
+
+      if (isFinalisedReportStatus(reportStatus)) return false;
+
+      const nextStatus: ReportAssetStatus = currentStatus === 'Completed'
+        ? 'Completed'
+        : params.progressPct > 0
+          ? 'InProgress'
+          : 'NotStarted';
+
+      const { error } = await supabase
         .from('report_assets')
         .update({
-          status: params.progressPct > 0 ? 'InProgress' : 'NotStarted',
-          started_at: new Date().toISOString(),
+          status: nextStatus,
+          started_at: currentStatus === 'Completed' ? undefined : new Date().toISOString(),
           draft_payload: params.draftPayload ?? {},
           last_saved_at: new Date().toISOString(),
         })
-        .eq('report_asset_id', reportAssetId)
-        .select('report_id');
+        .eq('report_asset_id', reportAssetId);
 
-      if (error || !data || data.length === 0) return false;
+      if (error) return false;
 
-      await syncReportProgress(asString((data[0] as { report_id?: string }).report_id));
+      await syncReportProgress(reportId);
       return true;
     }
 
@@ -1045,7 +1161,6 @@ export async function submitConditionReport(params: {
   replacementRequired?: boolean;
   priorityLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
   safetyConcern?: boolean;
-  // Legacy caller support only. Critical alerts are now derived from priority/condition/safety.
   criticalAlert?: boolean;
   recommendedAction?: string | null;
   estimatedMaintenanceCost?: number | null;
@@ -1077,7 +1192,7 @@ export async function submitConditionReport(params: {
           'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
         )
         .eq('asset_id', params.assetId)
-        .in('status', ['NotStarted', 'InProgress', 'Flagged'])
+        .in('status', ['NotStarted', 'InProgress', 'Completed', 'Flagged'])
         .order('due_at', { ascending: true })
         .limit(1)
         .maybeSingle();
@@ -1087,6 +1202,11 @@ export async function submitConditionReport(params: {
       }
 
       reportAsset = data as unknown as ReportAssetRow;
+    }
+
+    const reportStatus = await fetchReportStatus(reportAsset.report_id);
+    if (isFinalisedReportStatus(reportStatus)) {
+      return { ok: false, error: 'This report has already been finalised and can no longer be edited.' };
     }
 
     const { data: user } = await supabase.auth.getUser();
@@ -1112,7 +1232,7 @@ export async function submitConditionReport(params: {
       operational_status: params.operationalStatus ?? 'Operational',
       maintenance_required: Boolean(params.maintenanceRequired),
       replacement_required: Boolean(params.replacementRequired),
-      priority_level: params.priorityLevel ?? 'Medium',
+      priority_level: params.priorityLevel ?? 'Low',
       safety_concern: Boolean(params.safetyConcern),
       general_notes: generalNotes,
       issue_description: issueDescription,
@@ -1138,6 +1258,8 @@ export async function submitConditionReport(params: {
         status: 'Completed',
         completed_at: new Date().toISOString(),
         notes: generalNotes ?? issueDescription,
+        draft_payload: auditPayload,
+        last_saved_at: new Date().toISOString(),
       })
       .eq('report_asset_id', reportAsset.report_asset_id);
 
@@ -1147,13 +1269,223 @@ export async function submitConditionReport(params: {
 
     await syncReportProgress(reportAsset.report_id);
 
+    const submittedAuditId = asString((auditData as { asset_audit_report_id?: string }).asset_audit_report_id);
+    const cachedAuditResult = auditResultRowToRecord({
+      ...auditPayload,
+      asset_audit_report_id: submittedAuditId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as unknown as AuditResultRow);
+
+    await updateCachedReportAssetAfterSubmit({
+      reportId: reportAsset.report_id,
+      reportAssetId: reportAsset.report_asset_id,
+      auditResult: cachedAuditResult,
+    });
+
+    // Refresh from Supabase when possible so cached report status/progress exactly matches DB.
+    await fetchReportById(reportAsset.report_id);
+
     return {
       ok: true,
-      auditId: asString((auditData as { asset_audit_report_id?: string }).asset_audit_report_id),
+      auditId: submittedAuditId,
     };
   } catch (error: any) {
     return { ok: false, error: error?.message ?? 'Submission failed.' };
   }
+}
+
+export async function fetchSubmittedAuditResult(reportAssetId: string): Promise<AdminAuditResultRecord | null> {
+  if (!reportAssetId) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('asset_audit_reports')
+      .select(
+        'asset_audit_report_id, report_id, report_asset_id, asset_id, completed_by, completed_at, condition_rating, expected_remaining_life_years, operational_status, maintenance_required, replacement_required, priority_level, safety_concern, general_notes, issue_description, recommended_action, estimated_maintenance_cost, estimated_replacement_cost, photo_urls'
+      )
+      .eq('report_asset_id', reportAssetId)
+      .maybeSingle();
+
+    if (error || !data) return await getCachedSubmittedAuditResult(reportAssetId);
+    return auditResultRowToRecord(data as unknown as AuditResultRow);
+  } catch {
+    return await getCachedSubmittedAuditResult(reportAssetId);
+  }
+}
+
+export async function finaliseAuditorReport(reportId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!reportId) return { ok: false, error: 'Report ID is required.' };
+
+  try {
+    const { data: reportData, error: reportError } = await supabase
+      .from('reports')
+      .select('report_id, status, assigned_user_id')
+      .eq('report_id', reportId)
+      .maybeSingle();
+
+    if (reportError || !reportData) {
+      return { ok: false, error: reportError?.message ?? 'Report could not be found.' };
+    }
+
+    const reportStatus = asString((reportData as { status?: string }).status) as ReportStatus;
+    if (reportStatus === 'Completed') return { ok: true };
+    if (reportStatus === 'Cancelled') return { ok: false, error: 'Cancelled reports cannot be finalised.' };
+
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id ?? '';
+    const assignedUserId = asString((reportData as { assigned_user_id?: string }).assigned_user_id);
+
+    if (assignedUserId && userId && assignedUserId !== userId) {
+      return { ok: false, error: 'Only the assigned auditor can finalise this report.' };
+    }
+
+    const { data: assetData, error: assetError } = await supabase
+      .from('report_assets')
+      .select('report_asset_id, status')
+      .eq('report_id', reportId);
+
+    if (assetError || !assetData) {
+      return { ok: false, error: assetError?.message ?? 'Could not load report assets.' };
+    }
+
+    const assets = assetData as Array<{ report_asset_id: string; status: ReportAssetStatus }>;
+    if (assets.length === 0) {
+      return { ok: false, error: 'This report has no assigned assets.' };
+    }
+
+    const incomplete = assets.filter((asset) => asset.status !== 'Completed');
+    if (incomplete.length > 0) {
+      return { ok: false, error: 'Complete every asset before finalising this report.' };
+    }
+
+    const completedAt = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from('reports')
+      .update({
+        status: 'Completed',
+        progress_pct: 100,
+        completed_at: completedAt,
+      })
+      .eq('report_id', reportId);
+
+    if (updateError) return { ok: false, error: updateError.message };
+
+    await markCachedReportFinalised(reportId);
+    await fetchReportById(reportId);
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? 'Could not finalise this report.' };
+  }
+}
+
+export async function syncPendingAuditSubmissions(reportId?: string): Promise<{
+  ok: boolean;
+  syncedCount: number;
+  failedCount: number;
+  error?: string;
+}> {
+  const pendingItems = reportId
+    ? await getPendingReportAudits(reportId)
+    : [];
+
+  const syncableItems = pendingItems.filter((item) => item.status === 'PendingSync' || item.status === 'SyncFailed');
+
+  if (syncableItems.length === 0) {
+    return { ok: true, syncedCount: 0, failedCount: 0 };
+  }
+
+  let syncedCount = 0;
+  let failedCount = 0;
+  let lastError = '';
+
+  for (const item of syncableItems) {
+    try {
+      const photoUrls: string[] = [];
+
+      for (const photo of item.photos ?? []) {
+        const existingUrl = photo.uploadedUrl || photo.remotePath;
+        if (existingUrl) {
+          photoUrls.push(existingUrl);
+          continue;
+        }
+
+        if (!photo.uri) continue;
+
+        if (isProbablyRemoteUrl(photo.uri)) {
+          photoUrls.push(photo.uri);
+          continue;
+        }
+
+        const upload = await uploadPhoto(pendingPhotoToCapturedPhoto(photo), `asset/${item.assetId}`);
+
+        if (!upload.ok) {
+          throw new Error(upload.error || 'Photo upload failed.');
+        }
+
+        const safeFileName =
+          photo.fileName?.trim() ||
+          upload.data.path?.split('/').pop() ||
+          `audit-photo-${Date.now()}.jpg`;
+
+        const fileUrl = upload.data.publicUrl ?? upload.data.path;
+        if (fileUrl) photoUrls.push(fileUrl);
+
+        if (fileUrl && item.locationId) {
+          try {
+            await saveAttachmentReference({
+              locationId: item.locationId,
+              fileUrl,
+              fileName: safeFileName,
+              description: `Photo for asset ${item.assetCode || item.assetName || item.assetId}`,
+            });
+          } catch (attachmentError) {
+            console.log('saveAttachmentReference during pending sync failed:', attachmentError);
+          }
+        }
+      }
+
+      const result = await submitConditionReport({
+        reportAssetId: item.reportAssetId,
+        assetId: item.assetId,
+        conditionRating: item.conditionRating,
+        expectedRemainingLifeYears: item.expectedRemainingLifeYears,
+        operationalStatus: item.operationalStatus,
+        maintenanceRequired: item.maintenanceRequired,
+        replacementRequired: item.replacementRequired,
+        priorityLevel: item.priorityLevel,
+        estimatedMaintenanceCost: item.estimatedMaintenanceCost,
+        estimatedReplacementCost: item.estimatedReplacementCost,
+        safetyConcern: item.safetyConcern,
+        issueDescription: item.issueDescription,
+        recommendedAction: item.recommendedAction,
+        generalNotes: item.generalNotes,
+        photoUrls,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.error || 'Pending audit sync failed.');
+      }
+
+      await removePendingAuditSubmission(item.reportAssetId);
+      syncedCount += 1;
+    } catch (error: any) {
+      failedCount += 1;
+      lastError = error?.message ?? 'Pending audit sync failed.';
+      await savePendingAuditSubmission({
+        ...item,
+        status: 'SyncFailed',
+        lastError,
+      });
+    }
+  }
+
+  return {
+    ok: failedCount === 0,
+    syncedCount,
+    failedCount,
+    error: failedCount > 0 ? lastError || 'Some pending audits could not be synced.' : undefined,
+  };
 }
 
 export type AuditorReportStatus = 'Assigned' | 'InProgress' | 'Completed';
@@ -1176,7 +1508,7 @@ export type AuditorReportRecord = {
 };
 
 function toAuditorReportStatus(status: ReportStatus, progressPct: number): AuditorReportStatus {
-  if (status === 'Completed' || progressPct >= 100) return 'Completed';
+  if (status === 'Completed') return 'Completed';
   if (status === 'InProgress' || progressPct > 0) return 'InProgress';
   return 'Assigned';
 }
@@ -1185,11 +1517,22 @@ export async function fetchAuditorReports(): Promise<{
   ok: boolean;
   reports: AuditorReportRecord[];
   error?: string;
+  fromCache?: boolean;
 }> {
   try {
     const { data: userData, error: userError } = await supabase.auth.getUser();
 
     if (userError || !userData.user?.id) {
+      const cached = await getCachedAuditorReports();
+      if (cached.length > 0) {
+        return {
+          ok: true,
+          reports: cached,
+          fromCache: true,
+          error: 'Showing cached reports because the signed-in user could not be verified online.',
+        };
+      }
+
       return {
         ok: false,
         reports: [],
@@ -1210,6 +1553,16 @@ export async function fetchAuditorReports(): Promise<{
       .order('created_at', { ascending: false });
 
     if (reportError || !reportData) {
+      const cached = await getCachedAuditorReports();
+      if (cached.length > 0) {
+        return {
+          ok: true,
+          reports: cached,
+          fromCache: true,
+          error: reportError?.message ?? 'Showing cached reports because the database is not reachable.',
+        };
+      }
+
       return {
         ok: false,
         reports: [],
@@ -1221,6 +1574,7 @@ export async function fetchAuditorReports(): Promise<{
     const reportIds = reports.map((report) => report.report_id);
 
     if (reportIds.length === 0) {
+      await cacheAuditorReports([]);
       return { ok: true, reports: [] };
     }
 
@@ -1232,6 +1586,16 @@ export async function fetchAuditorReports(): Promise<{
       .in('report_id', reportIds);
 
     if (reportAssetError) {
+      const cached = await getCachedAuditorReports();
+      if (cached.length > 0) {
+        return {
+          ok: true,
+          reports: cached,
+          fromCache: true,
+          error: reportAssetError.message,
+        };
+      }
+
       return {
         ok: false,
         reports: [],
@@ -1242,33 +1606,61 @@ export async function fetchAuditorReports(): Promise<{
     const reportAssets = (reportAssetData ?? []) as unknown as ReportAssetRow[];
     const locationNames = await fetchLookupNames('location', 'location_id', unique(reports.map((report) => report.location_id)));
 
+    const reportRecords = reports.map((report) => {
+      const assets = reportAssets.filter((asset) => asset.report_id === report.report_id);
+      const assetCount = assets.length;
+      const completedAssetCount = assets.filter((asset) => asset.status === 'Completed').length;
+      const progressPct = asNumber(report.progress_pct, calculateProgress(assets));
+
+      return {
+        id: report.report_id,
+        title: report.title,
+        description: asString(report.description),
+        summary: asString(report.summary),
+        locationId: asString(report.location_id),
+        locationName: locationNames[asString(report.location_id)] ?? '',
+        assignedUserId: asString(report.assigned_user_id),
+        status: toAuditorReportStatus(report.status, progressPct),
+        dueDate: dateOnly(report.due_at),
+        progressPct,
+        assetCount,
+        completedAssetCount,
+        createdAt: report.created_at,
+        updatedAt: report.updated_at,
+      } satisfies AuditorReportRecord;
+    });
+
+    await cacheAuditorReports(reportRecords);
+
+    // The Reports tab is the offline preparation point. When it loads online,
+    // cache the full report bundles so list, detail, and asset form screens can
+    // still work after the auditor leaves Wi-Fi.
+    await Promise.all(
+      reportRecords.map(async (report) => {
+        try {
+          await fetchReportById(report.id);
+        } catch (error) {
+          console.log('offline report detail pre-cache failed:', report.id, error);
+        }
+      })
+    );
+
     return {
       ok: true,
-      reports: reports.map((report) => {
-        const assets = reportAssets.filter((asset) => asset.report_id === report.report_id);
-        const assetCount = assets.length;
-        const completedAssetCount = assets.filter((asset) => asset.status === 'Completed').length;
-        const progressPct = asNumber(report.progress_pct, calculateProgress(assets));
-
-        return {
-          id: report.report_id,
-          title: report.title,
-          description: asString(report.description),
-          summary: asString(report.summary),
-          locationId: asString(report.location_id),
-          locationName: locationNames[asString(report.location_id)] ?? '',
-          assignedUserId: asString(report.assigned_user_id),
-          status: toAuditorReportStatus(report.status, progressPct),
-          dueDate: dateOnly(report.due_at),
-          progressPct,
-          assetCount,
-          completedAssetCount,
-          createdAt: report.created_at,
-          updatedAt: report.updated_at,
-        };
-      }),
+      reports: reportRecords,
+      fromCache: false,
     };
   } catch (error: any) {
+    const cached = await getCachedAuditorReports();
+    if (cached.length > 0) {
+      return {
+        ok: true,
+        reports: cached,
+        fromCache: true,
+        error: error?.message ?? 'Showing cached reports because the database is not reachable.',
+      };
+    }
+
     return {
       ok: false,
       reports: [],
@@ -1285,6 +1677,9 @@ export type ReportAssetForAuditRecord = {
   reportSummary: string;
   reportDueDate: string;
   reportProgressPct: number;
+  reportStatus: ReportStatus;
+  reportCompletedAt: string;
+  isReportFinalised: boolean;
   assetId: string;
   assetCode: string;
   assetName: string;
@@ -1308,6 +1703,7 @@ export async function fetchReportAssetForAudit(reportAssetId: string): Promise<{
   ok: boolean;
   item?: ReportAssetForAuditRecord;
   error?: string;
+  fromCache?: boolean;
 }> {
   if (!reportAssetId) {
     return { ok: false, error: 'Report asset ID is required.' };
@@ -1323,6 +1719,16 @@ export async function fetchReportAssetForAudit(reportAssetId: string): Promise<{
       .maybeSingle();
 
     if (reportAssetError || !reportAssetData) {
+      const cached = await getCachedReportAssetForAudit(reportAssetId);
+      if (cached) {
+        return {
+          ok: true,
+          item: cached,
+          fromCache: true,
+          error: reportAssetError?.message ?? 'Showing cached asset details because the database is not reachable.',
+        };
+      }
+
       return {
         ok: false,
         error: reportAssetError?.message ?? 'This assigned report asset could not be found.',
@@ -1343,6 +1749,16 @@ export async function fetchReportAssetForAudit(reportAssetId: string): Promise<{
     ]);
 
     if (reportError || !reportData) {
+      const cached = await getCachedReportAssetForAudit(reportAssetId);
+      if (cached) {
+        return {
+          ok: true,
+          item: cached,
+          fromCache: true,
+          error: reportError?.message ?? 'Showing cached report asset because the database is not reachable.',
+        };
+      }
+
       return {
         ok: false,
         error: reportError?.message ?? 'The parent report could not be found.',
@@ -1353,6 +1769,16 @@ export async function fetchReportAssetForAudit(reportAssetId: string): Promise<{
     const asset = assetMap[asString(reportAsset.asset_id)];
 
     if (!asset) {
+      const cached = await getCachedReportAssetForAudit(reportAssetId);
+      if (cached) {
+        return {
+          ok: true,
+          item: cached,
+          fromCache: true,
+          error: 'Showing cached asset details because the linked asset could not be reached online.',
+        };
+      }
+
       return { ok: false, error: 'The linked asset could not be found.' };
     }
 
@@ -1368,6 +1794,9 @@ export async function fetchReportAssetForAudit(reportAssetId: string): Promise<{
         reportSummary: asString(report.summary),
         reportDueDate: dateOnly(report.due_at),
         reportProgressPct: progressPct,
+        reportStatus: report.status,
+        reportCompletedAt: report.completed_at ?? '',
+        isReportFinalised: report.status === 'Completed',
         assetId: asset.id,
         assetCode: asset.code,
         assetName: asset.name,
@@ -1388,6 +1817,17 @@ export async function fetchReportAssetForAudit(reportAssetId: string): Promise<{
       },
     };
   } catch (error: any) {
+    console.log('fetchReportAssetForAudit error:', error?.message ?? error);
+    const cached = await getCachedReportAssetForAudit(reportAssetId);
+    if (cached) {
+      return {
+        ok: true,
+        item: cached,
+        fromCache: true,
+        error: error?.message ?? 'Showing cached asset details because the database is not reachable.',
+      };
+    }
+
     return {
       ok: false,
       error: error?.message ?? 'Could not load this report asset.',

@@ -128,7 +128,7 @@ export default function LoginScreen() {
       router.replace('/update-password?first=1' as any);
       return;
     }
-      router.replace('/audit/history' as any);
+      router.replace('/audit/reports' as any);
     } catch (err) {
       setLoading(false);
       const message = err instanceof Error ? err.message : 'Unknown error';
