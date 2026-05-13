@@ -12,6 +12,7 @@ import { resolveDepartmentNames, resolveLocationNames, resolveUserNames } from '
 
 type ReportView = 'ToDo' | 'InProgress' | 'Completed';
 type FilterKey = 'department' | 'location' | 'user';
+type FilterMode = 'search' | 'filters';
 
 function displayStatus(status: ReportView) {
   if (status === 'InProgress') return 'In Progress';
@@ -28,6 +29,7 @@ export default function AdminReportsPage() {
 
   const [reports, setReports] = React.useState<AdminReportRecord[]>([]);
   const [view, setView] = React.useState<ReportView>('ToDo');
+  const [filterMode, setFilterMode] = React.useState<FilterMode>('search');
   const [query, setQuery] = React.useState('');
   const [department, setDepartment] = React.useState('All');
   const [location, setLocation] = React.useState('All');
@@ -120,6 +122,14 @@ export default function AdminReportsPage() {
     return { label: '', options: [] as string[] };
   }, [pickerField, departmentOptions, locationOptions, userOptions]);
 
+  const activeFilterCount = [department, location, assignedUser].filter((value) => value !== 'All').length;
+
+  const resetFilters = () => {
+    setDepartment('All');
+    setLocation('All');
+    setAssignedUser('All');
+  };
+
   const filtered = React.useMemo(() => {
     return reports
       .filter((report) => report.status === view)
@@ -169,6 +179,46 @@ export default function AdminReportsPage() {
         <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
       </View>
 
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: t.spacing.sm,
+          padding: 4,
+          borderWidth: 1,
+          borderColor: t.colors.border.subtle,
+          borderRadius: t.radius.lg,
+          backgroundColor: t.colors.card.surfaceAlt,
+        }}>
+        <Pressable
+          style={{
+            flex: 1,
+            minHeight: 42,
+            borderRadius: t.radius.md,
+            backgroundColor: '#2F6B4B',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+          <Text style={{ color: '#fff', fontWeight: '800' }}>Reports</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/admin/reports/results' as any)}
+          style={({ pressed }) => [
+            {
+              flex: 1,
+              minHeight: 42,
+              borderRadius: t.radius.md,
+              backgroundColor: pressed ? 'rgba(0,74,38,0.08)' : 'transparent',
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+          ]}>
+          <Text style={{ color: '#2F5B45', fontWeight: '800' }}>Audit Results</Text>
+        </Pressable>
+      </View>
+
+      <View style={{ height: t.spacing.md }} />
+
       <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
         {[
           { label: 'Assigned', value: 'ToDo' as const },
@@ -203,49 +253,60 @@ export default function AdminReportsPage() {
 
       <View style={{ height: t.spacing.md }} />
 
-      <SearchInput
-        value={query}
-        onChangeText={setQuery}
-        placeholder="Search report title, assets, location, department, or assigned user..."
-      />
+      <View style={{ gap: t.spacing.md }}>
+        <View style={{ flexDirection: 'row', gap: t.spacing.sm }}>
+          <FilterModeButton label="Search" active={filterMode === 'search'} onPress={() => setFilterMode('search')} />
+          <FilterModeButton label="Search by filters" active={filterMode === 'filters'} onPress={() => setFilterMode('filters')} />
+        </View>
 
-      <View style={{ height: t.spacing.md }} />
+        {filterMode === 'search' ? (
+          <SearchInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search report title, assets, location, department, or assigned user..."
+          />
+        ) : (
+          <View style={{ gap: t.spacing.md }}>
+            <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+              <DropdownField
+                label="Department"
+                value={department}
+                defaultValue="All"
+                defaultLabel="All departments"
+                onPress={() => {
+                  setPickerField('department');
+                  setPickerDraftValue(department);
+                }}
+              />
+              <DropdownField
+                label="Location"
+                value={location}
+                defaultValue="All"
+                defaultLabel="All locations"
+                onPress={() => {
+                  setPickerField('location');
+                  setPickerDraftValue(location);
+                }}
+              />
+              <DropdownField
+                label="Assigned user"
+                value={assignedUser}
+                defaultValue="All"
+                defaultLabel="All users"
+                onPress={() => {
+                  setPickerField('user');
+                  setPickerDraftValue(assignedUser);
+                }}
+              />
+            </View>
 
-      <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-        <FilterPill
-          title="Department"
-          value={department}
-          onPress={() => {
-            setPickerField('department');
-            setPickerDraftValue(department);
-          }}
-        />
-        <FilterPill
-          title="Location"
-          value={location}
-          onPress={() => {
-            setPickerField('location');
-            setPickerDraftValue(location);
-          }}
-        />
-        <FilterPill
-          title="User"
-          value={assignedUser}
-          onPress={() => {
-            setPickerField('user');
-            setPickerDraftValue(assignedUser);
-          }}
-        />
-        <FilterPill
-          title="Clear filters"
-          value=""
-          onPress={() => {
-            setDepartment('All');
-            setLocation('All');
-            setAssignedUser('All');
-            setQuery('');
-          }}
-        />
+            {activeFilterCount > 0 ? (
+              <View style={{ alignItems: 'flex-start' }}>
+                <ResetFiltersButton label="Reset filters" onPress={resetFilters} />
+              </View>
+            ) : null}
+          </View>
+        )}
       </View>
 
       <View style={{ height: t.spacing.lg }} />
@@ -422,16 +483,93 @@ export default function AdminReportsPage() {
   );
 }
 
-function FilterPill({
-  title,
-  value,
+
+function FilterModeButton({
+  label,
+  active,
   onPress,
 }: {
-  title: string;
-  value: string;
+  label: string;
+  active: boolean;
   onPress: () => void;
 }) {
-  const isClear = title === 'Clear filters';
+  const t = useTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        {
+          minHeight: 38,
+          borderRadius: 999,
+          paddingHorizontal: 14,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 1,
+          borderColor: active ? 'rgba(31,59,44,0.22)' : t.colors.border.subtle,
+          backgroundColor: active ? t.colors.brand.forestTint : pressed ? 'rgba(30,31,28,0.04)' : t.colors.card.surface,
+        },
+      ]}>
+      <Text
+        style={[
+          t.text.caption,
+          {
+            fontWeight: '700',
+            color: active ? t.colors.brand.forest : t.colors.text.secondary,
+          },
+        ]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function DropdownField({
+  label,
+  value,
+  defaultValue,
+  defaultLabel,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  defaultValue: string;
+  defaultLabel: string;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  const isDefault = value === defaultValue;
+
+  return (
+    <View style={{ flex: 1, gap: 6 }}>
+      <Text style={[t.text.caption, { fontWeight: '700' }]}>{label}</Text>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [
+          {
+            minHeight: 52,
+            borderWidth: 1,
+            borderColor: t.colors.border.subtle,
+            borderRadius: t.radius.lg,
+            backgroundColor: t.colors.card.surface,
+            paddingHorizontal: t.spacing.md,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexDirection: 'row',
+            opacity: pressed ? 0.96 : 1,
+          },
+        ]}>
+        <Text style={[t.text.body, { color: isDefault ? t.colors.text.muted : t.colors.text.primary }]} numberOfLines={1}>
+          {isDefault ? defaultLabel : value}
+        </Text>
+        <Text style={{ color: t.colors.text.muted, fontSize: 12 }}>▼</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ResetFiltersButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const t = useTheme();
 
   return (
     <Pressable
@@ -439,17 +577,15 @@ function FilterPill({
       style={({ pressed }) => [
         {
           minHeight: 40,
-          borderRadius: 999,
-          paddingHorizontal: 14,
           borderWidth: 1,
-          borderColor: isClear ? 'rgba(166,88,75,0.35)' : 'rgba(0,74,38,0.22)',
-          backgroundColor: pressed ? 'rgba(0,74,38,0.08)' : '#FBF7F0',
+          borderColor: 'rgba(0,74,38,0.42)',
+          borderRadius: 999,
+          paddingHorizontal: 16,
           justifyContent: 'center',
+          backgroundColor: pressed ? 'rgba(0,74,38,0.20)' : 'rgba(0,74,38,0.14)',
         },
       ]}>
-      <Text style={{ fontSize: 13, fontWeight: '700', color: isClear ? '#8A3F35' : '#2F5B45' }}>
-        {isClear ? title : `${title}: ${value}`}
-      </Text>
+      <Text style={[t.text.caption, { fontWeight: '800', color: '#0F4A31', fontSize: 15 }]}>{label}</Text>
     </Pressable>
   );
 }

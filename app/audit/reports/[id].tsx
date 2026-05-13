@@ -144,34 +144,51 @@ export default function AuditorReportDetailScreen() {
     Alert.alert('Sync complete', `${result.syncedCount} pending audit${result.syncedCount === 1 ? '' : 's'} synced.`);
   }, [loadReport, reportId, syncing]);
 
-  const handleFinaliseReport = React.useCallback(() => {
-    if (!report || !canFinalise) return;
+  const handleFinaliseReport = React.useCallback(async () => {
+    if (!report) {
+      Alert.alert('Report unavailable', 'This report could not be loaded.');
+      return;
+    }
 
-    Alert.alert(
-      'Finalise report?',
-      'After finalising, this report and its asset audits will be locked from further auditor edits.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Finalise',
-          style: 'default',
-          onPress: async () => {
-            setFinalising(true);
-            const result = await finaliseAuditorReport(report.id);
-            setFinalising(false);
+    if (reportIsFinalised) {
+      Alert.alert('Already finalised', 'This report has already been finalised.');
+      return;
+    }
 
-            if (!result.ok) {
-              Alert.alert('Could not finalise report', result.error ?? 'Please try again.');
-              return;
-            }
+    if (hasPendingItems) {
+      Alert.alert('Sync required', 'Sync all local pending audits before finalising this report.');
+      return;
+    }
 
-            await loadReport('refresh');
-            Alert.alert('Report finalised', 'This report is now locked from auditor edits.');
-          },
-        },
-      ]
-    );
-  }, [canFinalise, loadReport, report]);
+    if (stats.total === 0) {
+      Alert.alert('No assets assigned', 'This report has no assigned assets to finalise.');
+      return;
+    }
+
+    if (stats.completed !== stats.total) {
+      Alert.alert(
+        'Report not complete',
+        `Complete all assigned assets before finalising. ${stats.completed}/${stats.total} assets are completed.`
+      );
+      return;
+    }
+
+    try {
+      setFinalising(true);
+
+      const result = await finaliseAuditorReport(report.id);
+
+      if (!result.ok) {
+        Alert.alert('Could not finalise report', result.error ?? 'Please try again.');
+        return;
+      }
+
+      await loadReport('refresh');
+      Alert.alert('Report finalised', 'This report is now locked from auditor edits.');
+    } finally {
+      setFinalising(false);
+    }
+  }, [hasPendingItems, loadReport, report, reportIsFinalised, stats.completed, stats.total]);
 
   return (
     <ScreenContainer>

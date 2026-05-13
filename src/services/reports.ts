@@ -72,6 +72,28 @@ export type AdminAuditResultRecord = {
   photoUrls: string[];
 };
 
+export type AdminAuditResultSearchRecord = AdminAuditResultRecord & {
+  reportTitle: string;
+  reportStatus: ReportStatus | '';
+  reportDueDate: string;
+  reportCompletedAt: string;
+  reportProgressPct: number;
+  reportAssignedUserId: string;
+  reportAssetStatus: ReportAssetStatus | '';
+  assetCode: string;
+  assetName: string;
+  category: string;
+  subCategory: string;
+  locationId: string;
+  locationName: string;
+  roomId: string;
+  roomName: string;
+  departmentId: string;
+  departmentName: string;
+  isFinalised: boolean;
+};
+
+
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
@@ -430,6 +452,115 @@ async function fetchLatestAuditResultsByReportAssetIds(
     return {};
   }
 }
+
+
+async function fetchReportsByIds(reportIds: Array<string | null | undefined>): Promise<Record<string, ReportRow>> {
+  const cleanIds = unique(reportIds);
+  if (cleanIds.length === 0) return {};
+
+  try {
+    const { data, error } = await supabase
+      .from('reports')
+      .select(
+        'report_id, title, location_id, assigned_user_id, created_by, status, due_at, progress_pct, summary, completed_at, created_at, updated_at, description'
+      )
+      .in('report_id', cleanIds);
+
+    if (error || !data) {
+      if (error) console.log('fetchReportsByIds error:', error.message);
+      return {};
+    }
+
+    return Object.fromEntries((data as unknown as ReportRow[]).map((row) => [row.report_id, row]));
+  } catch (error: any) {
+    console.log('fetchReportsByIds error:', error?.message ?? error);
+    return {};
+  }
+}
+
+async function fetchReportAssetsByIds(reportAssetIds: Array<string | null | undefined>): Promise<Record<string, ReportAssetRow>> {
+  const cleanIds = unique(reportAssetIds);
+  if (cleanIds.length === 0) return {};
+
+  try {
+    const { data, error } = await supabase
+      .from('report_assets')
+      .select(
+        'report_asset_id, report_id, asset_id, status, started_at, completed_at, notes, created_at, updated_at, assigned_user_id, due_at'
+      )
+      .in('report_asset_id', cleanIds);
+
+    if (error || !data) {
+      if (error) console.log('fetchReportAssetsByIds error:', error.message);
+      return {};
+    }
+
+    return Object.fromEntries((data as unknown as ReportAssetRow[]).map((row) => [row.report_asset_id, row]));
+  } catch (error: any) {
+    console.log('fetchReportAssetsByIds error:', error?.message ?? error);
+    return {};
+  }
+}
+
+export async function fetchAdminAuditResults(params?: { limit?: number }): Promise<AdminAuditResultSearchRecord[]> {
+  const limit = Math.min(Math.max(params?.limit ?? 500, 1), 1000);
+
+  try {
+    const { data, error } = await supabase
+      .from('asset_audit_reports')
+      .select(
+        'asset_audit_report_id, report_id, report_asset_id, asset_id, completed_by, completed_at, condition_rating, expected_remaining_life_years, operational_status, maintenance_required, replacement_required, priority_level, safety_concern, general_notes, issue_description, recommended_action, estimated_maintenance_cost, estimated_replacement_cost, photo_urls, created_at, updated_at'
+      )
+      .order('completed_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(limit);
+
+    if (error || !data) {
+      if (error) console.log('fetchAdminAuditResults error:', error.message);
+      return [];
+    }
+
+    const rows = data as unknown as AuditResultRow[];
+    const [reportMap, reportAssetMap, assetMap] = await Promise.all([
+      fetchReportsByIds(rows.map((row) => row.report_id)),
+      fetchReportAssetsByIds(rows.map((row) => row.report_asset_id)),
+      fetchAssetsByIds(unique(rows.map((row) => row.asset_id))),
+    ]);
+
+    return rows.map((row) => {
+      const audit = auditResultRowToRecord(row);
+      const report = reportMap[audit.reportId];
+      const reportAsset = reportAssetMap[audit.reportAssetId];
+      const asset = assetMap[audit.assetId];
+
+      return {
+        ...audit,
+        reportTitle: report?.title ?? 'Unknown report',
+        reportStatus: report?.status ?? '',
+        reportDueDate: dateOnly(report?.due_at),
+        reportCompletedAt: report?.completed_at ?? '',
+        reportProgressPct: asNumber(report?.progress_pct, 0),
+        reportAssignedUserId: asString(report?.assigned_user_id),
+        reportAssetStatus: reportAsset?.status ?? '',
+        assetCode: asset?.code ?? '',
+        assetName: asset?.name ?? 'Unknown asset',
+        category: asset?.category ?? '',
+        subCategory: asset?.subCategory ?? '',
+        locationId: asset?.locationId ?? '',
+        locationName: asset?.locationName ?? '',
+        roomId: asset?.roomId ?? '',
+        roomName: asset?.roomName ?? '',
+        departmentId: asset?.departmentId ?? '',
+        departmentName: asset?.departmentName ?? '',
+        isFinalised: report?.status === 'Completed',
+      };
+    });
+  } catch (error: any) {
+    console.log('fetchAdminAuditResults error:', error?.message ?? error);
+    return [];
+  }
+}
+
 
 function reportRowToAdminReport(
   row: ReportRow,
@@ -1423,16 +1554,16 @@ export async function syncPendingAuditSubmissions(reportId?: string): Promise<{
           throw new Error(upload.error || 'Photo upload failed.');
         }
 
-        const safeFileName =
-          photo.fileName?.trim() ||
-          upload.data.path?.split('/').pop() ||
-          `audit-photo-${Date.now()}.jpg`;
-
         const fileUrl = upload.data.publicUrl ?? upload.data.path;
         if (fileUrl) photoUrls.push(fileUrl);
 
         if (fileUrl && item.locationId) {
           try {
+            const safeFileName =
+              photo.fileName?.trim() ||
+              upload.data.path?.split('/').pop() ||
+              `audit-photo-${Date.now()}.jpg`;
+
             await saveAttachmentReference({
               locationId: item.locationId,
               fileUrl,
