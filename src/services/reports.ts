@@ -5,6 +5,57 @@ import type { AuditAssignment, AuditStatus } from '@/src/types/models';
 type ReportStatus = 'Draft' | 'Assigned' | 'InProgress' | 'Completed' | 'Cancelled';
 type ReportAssetStatus = 'NotStarted' | 'InProgress' | 'Completed' | 'Flagged' | 'Skipped';
 
+type AuditOperationalStatus = 'Operational' | 'Partially Operational' | 'Not Operational' | 'Not Inspected';
+type AuditPriorityLevel = 'Low' | 'Medium' | 'High' | 'Critical';
+
+type AuditResultRow = {
+  asset_audit_report_id: string;
+  report_id: string | null;
+  report_asset_id: string | null;
+  asset_id: string | null;
+  completed_by: string | null;
+  completed_at: string | null;
+  condition_rating: number | null;
+  expected_remaining_life_years: number | null;
+  operational_status: AuditOperationalStatus | null;
+  maintenance_required: boolean | null;
+  replacement_required: boolean | null;
+  priority_level: AuditPriorityLevel | null;
+  safety_concern: boolean | null;
+  general_notes: string | null;
+  issue_description: string | null;
+  recommended_action: string | null;
+  estimated_maintenance_cost: number | null;
+  estimated_replacement_cost: number | null;
+  photo_urls: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type AdminAuditResultRecord = {
+  id: string;
+  reportId: string;
+  reportAssetId: string;
+  assetId: string;
+  completedBy: string;
+  completedAt: string;
+  conditionRating: number | null;
+  expectedRemainingLifeYears: number | null;
+  operationalStatus: AuditOperationalStatus | '';
+  maintenanceRequired: boolean;
+  replacementRequired: boolean;
+  priorityLevel: AuditPriorityLevel | '';
+  safetyConcern: boolean;
+  criticalAlert: boolean;
+  generalNotes: string;
+  issueDescription: string;
+  recommendedAction: string;
+  estimatedMaintenanceCost: number | null;
+  estimatedReplacementCost: number | null;
+  photoUrls: string[];
+};
+
+
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
@@ -115,6 +166,7 @@ export type ReportAssetRecord = {
   notes: string;
   startedAt?: string;
   completedAt?: string;
+  auditResult?: AdminAuditResultRecord | null;
 };
 
 export type ReportDetailsRecord = AdminReportRecord & {
@@ -256,6 +308,84 @@ function makeAssetSummary(reportAssets: ReportAssetRow[], assetMap: Record<strin
   return `${codes.slice(0, 3).join(', ')} +${codes.length - 3} more`;
 }
 
+function auditResultRowToRecord(row: AuditResultRow): AdminAuditResultRecord {
+  return {
+    id: asString(row.asset_audit_report_id),
+    reportId: asString(row.report_id),
+    reportAssetId: asString(row.report_asset_id),
+    assetId: asString(row.asset_id),
+    completedBy: asString(row.completed_by),
+    completedAt: row.completed_at ?? '',
+    conditionRating:
+      typeof row.condition_rating === 'number' && Number.isFinite(row.condition_rating)
+        ? row.condition_rating
+        : null,
+    expectedRemainingLifeYears:
+      typeof row.expected_remaining_life_years === 'number' && Number.isFinite(row.expected_remaining_life_years)
+        ? row.expected_remaining_life_years
+        : null,
+    operationalStatus: row.operational_status ?? '',
+    maintenanceRequired: Boolean(row.maintenance_required),
+    replacementRequired: Boolean(row.replacement_required),
+    priorityLevel: row.priority_level ?? '',
+    safetyConcern: Boolean(row.safety_concern),
+    criticalAlert:
+      row.priority_level === 'Critical' ||
+      row.condition_rating === 1 ||
+      Boolean(row.safety_concern),
+    generalNotes: asString(row.general_notes),
+    issueDescription: asString(row.issue_description),
+    recommendedAction: asString(row.recommended_action),
+    estimatedMaintenanceCost:
+      typeof row.estimated_maintenance_cost === 'number' && Number.isFinite(row.estimated_maintenance_cost)
+        ? row.estimated_maintenance_cost
+        : null,
+    estimatedReplacementCost:
+      typeof row.estimated_replacement_cost === 'number' && Number.isFinite(row.estimated_replacement_cost)
+        ? row.estimated_replacement_cost
+        : null,
+    photoUrls: Array.isArray(row.photo_urls)
+      ? row.photo_urls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+      : [],
+  };
+}
+
+async function fetchLatestAuditResultsByReportAssetIds(
+  reportAssetIds: string[]
+): Promise<Record<string, AdminAuditResultRecord>> {
+  const cleanIds = unique(reportAssetIds);
+  if (cleanIds.length === 0) return {};
+
+  try {
+    const { data, error } = await supabase
+      .from('asset_audit_reports')
+      .select(
+        'asset_audit_report_id, report_id, report_asset_id, asset_id, completed_by, completed_at, condition_rating, expected_remaining_life_years, operational_status, maintenance_required, replacement_required, priority_level, safety_concern, general_notes, issue_description, recommended_action, estimated_maintenance_cost, estimated_replacement_cost, photo_urls, created_at, updated_at'
+      )
+      .in('report_asset_id', cleanIds)
+      .order('completed_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false, nullsFirst: false });
+
+    if (error || !data) {
+      if (error) console.log('fetchLatestAuditResultsByReportAssetIds error:', error.message);
+      return {};
+    }
+
+    const resultMap: Record<string, AdminAuditResultRecord> = {};
+
+    for (const row of data as unknown as AuditResultRow[]) {
+      const reportAssetId = asString(row.report_asset_id);
+      if (!reportAssetId || resultMap[reportAssetId]) continue;
+      resultMap[reportAssetId] = auditResultRowToRecord(row);
+    }
+
+    return resultMap;
+  } catch (error: any) {
+    console.log('fetchLatestAuditResultsByReportAssetIds error:', error?.message ?? error);
+    return {};
+  }
+}
+
 function reportRowToAdminReport(
   row: ReportRow,
   reportAssets: ReportAssetRow[],
@@ -291,7 +421,7 @@ function reportRowToAdminReport(
   };
 }
 
-function reportAssetRowToRecord(row: ReportAssetRow, asset?: AssetLookup): ReportAssetRecord {
+function reportAssetRowToRecord(row: ReportAssetRow, asset?: AssetLookup, auditResult?: AdminAuditResultRecord): ReportAssetRecord {
   return {
     id: row.report_asset_id,
     reportId: row.report_id,
@@ -312,6 +442,7 @@ function reportAssetRowToRecord(row: ReportAssetRow, asset?: AssetLookup): Repor
     notes: asString(row.notes),
     startedAt: row.started_at ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    auditResult: auditResult ?? null,
   };
 }
 
@@ -450,9 +581,14 @@ export async function fetchReportAssets(reportId: string): Promise<ReportAssetRe
   }
 
   const rows = data as unknown as ReportAssetRow[];
-  const assetMap = await fetchAssetsByIds(unique(rows.map((row) => row.asset_id)));
+  const [assetMap, auditResultMap] = await Promise.all([
+    fetchAssetsByIds(unique(rows.map((row) => row.asset_id))),
+    fetchLatestAuditResultsByReportAssetIds(rows.map((row) => row.report_asset_id)),
+  ]);
 
-  return rows.map((row) => reportAssetRowToRecord(row, assetMap[asString(row.asset_id)]));
+  return rows.map((row) =>
+    reportAssetRowToRecord(row, assetMap[asString(row.asset_id)], auditResultMap[row.report_asset_id])
+  );
 }
 
 export async function fetchReportById(reportId: string): Promise<ReportDetailsRecord | null> {
@@ -893,10 +1029,13 @@ export async function fetchAuditDraft(reportAssetId: string): Promise<Record<str
 export async function submitConditionReport(params: {
   assetId: string;
   inspectorName?: string;
-  findings: string;
-  comments: string;
+  findings?: string;
+  comments?: string;
+  issueDescription?: string | null;
+  generalNotes?: string | null;
   photoTaken?: boolean;
   photoReference?: string | null;
+  photoUrls?: string[];
   assignmentId?: string;
   reportAssetId?: string;
   conditionRating?: number;
@@ -906,6 +1045,7 @@ export async function submitConditionReport(params: {
   replacementRequired?: boolean;
   priorityLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
   safetyConcern?: boolean;
+  // Legacy caller support only. Critical alerts are now derived from priority/condition/safety.
   criticalAlert?: boolean;
   recommendedAction?: string | null;
   estimatedMaintenanceCost?: number | null;
@@ -952,36 +1092,39 @@ export async function submitConditionReport(params: {
     const { data: user } = await supabase.auth.getUser();
     const completedBy = user.user?.id ?? null;
 
-    const photoUrls =
-      params.photoReference || params.photoTaken
+    const photoUrls = Array.isArray(params.photoUrls)
+      ? params.photoUrls.filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+      : params.photoReference || params.photoTaken
         ? [params.photoReference || 'Photo attached']
-        : null;
+        : [];
+
+    const issueDescription = params.issueDescription ?? params.findings ?? null;
+    const generalNotes = params.generalNotes ?? params.comments ?? null;
+
+    const auditPayload = {
+      report_id: reportAsset.report_id,
+      report_asset_id: reportAsset.report_asset_id,
+      asset_id: params.assetId || reportAsset.asset_id,
+      completed_by: completedBy,
+      completed_at: new Date().toISOString(),
+      condition_rating: params.conditionRating ?? 3,
+      expected_remaining_life_years: params.expectedRemainingLifeYears ?? null,
+      operational_status: params.operationalStatus ?? 'Operational',
+      maintenance_required: Boolean(params.maintenanceRequired),
+      replacement_required: Boolean(params.replacementRequired),
+      priority_level: params.priorityLevel ?? 'Medium',
+      safety_concern: Boolean(params.safetyConcern),
+      general_notes: generalNotes,
+      issue_description: issueDescription,
+      recommended_action: params.recommendedAction ?? null,
+      estimated_maintenance_cost: params.estimatedMaintenanceCost ?? null,
+      estimated_replacement_cost: params.estimatedReplacementCost ?? null,
+      photo_urls: photoUrls,
+    };
 
     const { data: auditData, error: auditError } = await supabase
       .from('asset_audit_reports')
-      .insert([
-        {
-          report_id: reportAsset.report_id,
-          report_asset_id: reportAsset.report_asset_id,
-          asset_id: params.assetId || reportAsset.asset_id,
-          completed_by: completedBy,
-          completed_at: new Date().toISOString(),
-          condition_rating: params.conditionRating ?? 3,
-          expected_remaining_life_years: params.expectedRemainingLifeYears ?? null,
-          operational_status: params.operationalStatus ?? 'Operational',
-          maintenance_required: Boolean(params.maintenanceRequired),
-          replacement_required: Boolean(params.replacementRequired),
-          priority_level: params.priorityLevel ?? 'Medium',
-          safety_concern: Boolean(params.safetyConcern),
-          critical_alert: Boolean(params.criticalAlert),
-          general_notes: params.comments,
-          issue_description: params.findings,
-          recommended_action: params.recommendedAction ?? null,
-          estimated_maintenance_cost: params.estimatedMaintenanceCost ?? null,
-          estimated_replacement_cost: params.estimatedReplacementCost ?? null,
-          photo_urls: photoUrls,
-        },
-      ])
+      .upsert(auditPayload, { onConflict: 'report_asset_id' })
       .select('asset_audit_report_id')
       .single();
 
@@ -994,7 +1137,7 @@ export async function submitConditionReport(params: {
       .update({
         status: 'Completed',
         completed_at: new Date().toISOString(),
-        notes: params.comments,
+        notes: generalNotes ?? issueDescription,
       })
       .eq('report_asset_id', reportAsset.report_asset_id);
 

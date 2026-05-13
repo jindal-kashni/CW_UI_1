@@ -1,11 +1,10 @@
 import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+
 import { Button, FormField, SectionCard, SegmentedControl } from '@/src/components';
-import { conditionOptions, criticalityOptions } from '@/src/data';
 import { AppBottomNav, ScreenContainer, TopBar } from '@/src/layout';
 import { useTheme } from '@/src/theme';
-import type { AssetCondition, Criticality } from '@/src/types/models';
 import {
   fetchAuditDraft,
   fetchReportAssetForAudit,
@@ -13,7 +12,6 @@ import {
   submitConditionReport,
   type ReportAssetForAuditRecord,
 } from '@/src/services/reports';
-import { saveAuditDraftSnapshot } from '@/src/state/auditDraftStore';
 import {
   type CapturedPhoto,
   captureFromCamera,
@@ -22,11 +20,10 @@ import {
   uploadPhoto,
 } from '@/src/services/photos';
 
+type ConditionRating = 1 | 2 | 3 | 4 | 5;
+type OperationalStatus = 'Operational' | 'Partially Operational' | 'Not Operational' | 'Not Inspected';
+type PriorityLevel = 'Low' | 'Medium' | 'High' | 'Critical';
 type YesNo = 'Yes' | 'No';
-type Capacity = 'Under' | 'At' | 'Over';
-type RemainingLife = '0_1' | '1_3' | '3_5' | '5_10' | '10_plus';
-type Risk = 'Low' | 'Medium' | 'High';
-type EffectiveUse = 'Strong' | 'Adequate' | 'Limited';
 
 type PhotoEntry = {
   local: CapturedPhoto;
@@ -35,68 +32,197 @@ type PhotoEntry = {
   error?: string;
 };
 
-function conditionToRating(condition?: AssetCondition) {
-  if (condition === 'Excellent') return 5;
-  if (condition === 'Good') return 4;
-  if (condition === 'Fair') return 3;
-  if (condition === 'Poor') return 2;
-  if (condition === 'Needs urgent attention') return 1;
-  return 3;
+type AuditDraftPayload = {
+  conditionRating?: ConditionRating;
+  expectedRemainingLifeYears?: string;
+  operationalStatus?: OperationalStatus;
+  maintenanceRequired?: boolean;
+  replacementRequired?: boolean;
+  priorityLevel?: PriorityLevel;
+  estimatedMaintenanceCost?: string;
+  estimatedReplacementCost?: string;
+  safetyConcern?: boolean;
+  issueDescription?: string;
+  recommendedAction?: string;
+  generalNotes?: string;
+  photos?: Array<{
+    uri: string;
+    remotePath?: string;
+    uploadStatus?: 'pending' | 'uploaded' | 'failed';
+  }>;
+};
+
+const CONDITION_OPTIONS: Array<{ label: string; value: ConditionRating }> = [
+  { label: '5 Excellent', value: 5 },
+  { label: '4 Good', value: 4 },
+  { label: '3 Fair', value: 3 },
+  { label: '2 Poor', value: 2 },
+  { label: '1 Urgent', value: 1 },
+];
+
+const OPERATIONAL_STATUS_OPTIONS: Array<{ label: string; value: OperationalStatus }> = [
+  { label: 'Operational', value: 'Operational' },
+  { label: 'Partially operational', value: 'Partially Operational' },
+  { label: 'Not operational', value: 'Not Operational' },
+  { label: 'Not inspected', value: 'Not Inspected' },
+];
+
+const PRIORITY_OPTIONS: Array<{ label: string; value: PriorityLevel }> = [
+  { label: 'Low', value: 'Low' },
+  { label: 'Medium', value: 'Medium' },
+  { label: 'High', value: 'High' },
+  { label: 'Critical', value: 'Critical' },
+];
+
+const YES_NO_OPTIONS: Array<{ label: string; value: YesNo }> = [
+  { label: 'Yes', value: 'Yes' },
+  { label: 'No', value: 'No' },
+];
+
+function conditionName(value: ConditionRating) {
+  if (value === 5) return 'Excellent';
+  if (value === 4) return 'Good';
+  if (value === 3) return 'Fair';
+  if (value === 2) return 'Poor';
+  return 'Needs urgent attention';
 }
 
-function remainingLifeToYears(value?: RemainingLife) {
-  if (value === '0_1') return 1;
-  if (value === '1_3') return 3;
-  if (value === '3_5') return 5;
-  if (value === '5_10') return 10;
-  if (value === '10_plus') return 15;
-  return null;
+function conditionToRating(value?: string): ConditionRating | undefined {
+  if (value === 'Excellent') return 5;
+  if (value === 'Good') return 4;
+  if (value === 'Fair') return 3;
+  if (value === 'Poor') return 2;
+  if (value === 'Needs urgent attention') return 1;
+  return undefined;
 }
 
-function operationalStatus(functional?: YesNo) {
-  if (functional === 'No') return 'Not Operational' as const;
-  if (functional === 'Yes') return 'Operational' as const;
-  return 'Not Inspected' as const;
+function remainingLifeToYears(value?: string): string | undefined {
+  if (value === '0_1') return '1';
+  if (value === '1_3') return '3';
+  if (value === '3_5') return '5';
+  if (value === '5_10') return '10';
+  if (value === '10_plus') return '15';
+  return undefined;
 }
 
-function priorityFromInputs(criticality?: Criticality, condition?: AssetCondition, complianceRisk?: Risk) {
-  if (criticality === 'Critical' || condition === 'Needs urgent attention' || complianceRisk === 'High') return 'Critical' as const;
-  if (criticality === 'High' || condition === 'Poor') return 'High' as const;
-  if (criticality === 'Low') return 'Low' as const;
-  return 'Medium' as const;
+function boolToYesNo(value: boolean): YesNo {
+  return value ? 'Yes' : 'No';
+}
+
+function yesNoToBool(value: YesNo): boolean {
+  return value === 'Yes';
+}
+
+function toNumberOrNull(value: string): number | null {
+  const clean = value.replace(/[$,\s]/g, '');
+  if (!clean) return null;
+  const parsed = Number(clean);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function calcProgress(payload: AuditDraftPayload) {
+  const checks = [
+    Boolean(payload.conditionRating),
+    payload.expectedRemainingLifeYears !== undefined && payload.expectedRemainingLifeYears !== '',
+    Boolean(payload.operationalStatus),
+    payload.maintenanceRequired !== undefined,
+    payload.replacementRequired !== undefined,
+    Boolean(payload.priorityLevel),
+    payload.estimatedMaintenanceCost !== undefined && payload.estimatedMaintenanceCost !== '',
+    payload.estimatedReplacementCost !== undefined && payload.estimatedReplacementCost !== '',
+    payload.safetyConcern !== undefined,
+    Boolean(payload.issueDescription?.trim()),
+    Boolean(payload.recommendedAction?.trim()),
+    Boolean(payload.generalNotes?.trim()),
+    Boolean(payload.photos?.length),
+  ];
+
+  const complete = checks.filter(Boolean).length;
+  return Math.max(10, Math.min(90, Math.round((complete / checks.length) * 100)));
+}
+
+function DetailText({ label, value }: { label: string; value?: string | null }) {
+  const t = useTheme();
+
+  if (!value) return null;
+
+  return (
+    <View style={{ gap: 2 }}>
+      <Text style={[t.text.caption, { fontSize: 11 }]}>{label}</Text>
+      <Text style={[t.text.body, { fontSize: 13, lineHeight: 18 }]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
 }
 
 export default function AuditorReportAssetAuditScreen() {
   const t = useTheme();
-  const { reportAssetId: rawReportAssetId } = useLocalSearchParams<{ reportAssetId: string }>();
+  const { reportAssetId: rawReportAssetId } = useLocalSearchParams<{ reportAssetId?: string | string[] }>();
   const reportAssetId = Array.isArray(rawReportAssetId) ? rawReportAssetId[0] : rawReportAssetId;
 
   const [record, setRecord] = React.useState<ReportAssetForAuditRecord | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
-  const [condition, setCondition] = React.useState<AssetCondition | undefined>(undefined);
-  const [criticality, setCriticality] = React.useState<Criticality | undefined>('Medium');
-  const [functional, setFunctional] = React.useState<YesNo | undefined>('Yes');
-  const [capacity, setCapacity] = React.useState<Capacity | undefined>('At');
-  const [remainingLife, setRemainingLife] = React.useState<RemainingLife | undefined>('3_5');
-  const [complianceRisk, setComplianceRisk] = React.useState<Risk | undefined>('Medium');
-  const [effectiveUse, setEffectiveUse] = React.useState<EffectiveUse | undefined>('Adequate');
-  const [environmentImpact, setEnvironmentImpact] = React.useState<Risk | undefined>('Low');
-  const [socialSignificance, setSocialSignificance] = React.useState<Risk | undefined>('Medium');
+  const [conditionRating, setConditionRating] = React.useState<ConditionRating>(3);
+  const [expectedRemainingLifeYears, setExpectedRemainingLifeYears] = React.useState('');
+  const [operationalStatus, setOperationalStatus] = React.useState<OperationalStatus>('Operational');
 
-  const [comments, setComments] = React.useState('');
-  const [photosCaptured, setPhotosCaptured] = React.useState<YesNo | undefined>('No');
-  const [photoNotes, setPhotoNotes] = React.useState('');
-  const [findingsSummary, setFindingsSummary] = React.useState('');
-  const [recommendedActions, setRecommendedActions] = React.useState('');
-  const [followUpOwner, setFollowUpOwner] = React.useState('');
+  const [maintenanceRequired, setMaintenanceRequired] = React.useState<YesNo>('No');
+  const [replacementRequired, setReplacementRequired] = React.useState<YesNo>('No');
+  const [priorityLevel, setPriorityLevel] = React.useState<PriorityLevel>('Low');
+  const [estimatedMaintenanceCost, setEstimatedMaintenanceCost] = React.useState('');
+  const [estimatedReplacementCost, setEstimatedReplacementCost] = React.useState('');
 
+  const [safetyConcern, setSafetyConcern] = React.useState<YesNo>('No');
+  const [issueDescription, setIssueDescription] = React.useState('');
+  const [recommendedAction, setRecommendedAction] = React.useState('');
+
+  const [generalNotes, setGeneralNotes] = React.useState('');
   const [photos, setPhotos] = React.useState<PhotoEntry[]>([]);
   const [photoMessage, setPhotoMessage] = React.useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = React.useState(false);
+
   const [savingDraft, setSavingDraft] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+
+  const draftPayload = React.useMemo<AuditDraftPayload>(
+    () => ({
+      conditionRating,
+      expectedRemainingLifeYears,
+      operationalStatus,
+      maintenanceRequired: yesNoToBool(maintenanceRequired),
+      replacementRequired: yesNoToBool(replacementRequired),
+      priorityLevel,
+      estimatedMaintenanceCost,
+      estimatedReplacementCost,
+      safetyConcern: yesNoToBool(safetyConcern),
+      issueDescription,
+      recommendedAction,
+      generalNotes,
+      photos: photos.map((entry) => ({
+        uri: entry.local.uri,
+        remotePath: entry.remotePath,
+        uploadStatus: entry.uploadStatus,
+      })),
+    }),
+    [
+      conditionRating,
+      expectedRemainingLifeYears,
+      operationalStatus,
+      maintenanceRequired,
+      replacementRequired,
+      priorityLevel,
+      estimatedMaintenanceCost,
+      estimatedReplacementCost,
+      safetyConcern,
+      issueDescription,
+      recommendedAction,
+      generalNotes,
+      photos,
+    ]
+  );
 
   React.useEffect(() => {
     let mounted = true;
@@ -125,31 +251,47 @@ export default function AuditorReportAssetAuditScreen() {
 
       setRecord(result.item);
 
-      const existingDraft = await fetchAuditDraft(reportAssetId);
+      const existingDraft = (await fetchAuditDraft(reportAssetId)) as AuditDraftPayload & Record<string, any> | null;
 
       if (existingDraft) {
-        setCondition(existingDraft.condition);
-        setCriticality(existingDraft.criticality);
-        setFunctional(existingDraft.functional);
-        setCapacity(existingDraft.capacity);
-        setRemainingLife(existingDraft.remainingLife);
-        setComplianceRisk(existingDraft.complianceRisk);
-        setEffectiveUse(existingDraft.effectiveUse);
-        setEnvironmentImpact(existingDraft.environmentImpact);
-        setSocialSignificance(existingDraft.socialSignificance);
-        setFindingsSummary(existingDraft.findingsSummary || '');
-        setRecommendedActions(existingDraft.recommendedActions || '');
-        setFollowUpOwner(existingDraft.followUpOwner || '');
-        setComments(existingDraft.comments || '');
-        setPhotoNotes(existingDraft.photoNotes || '');
-        setPhotosCaptured(existingDraft.photosCaptured ? 'Yes' : 'No');
-        setPhotos(
-          (existingDraft.photos || []).map((photo: any) => ({
-            local: { uri: photo.uri } as CapturedPhoto,
-            uploadStatus: photo.uploadStatus ?? 'uploaded',
-            remotePath: photo.remotePath,
-          }))
-        );
+        const legacyConditionRating = conditionToRating(existingDraft.condition);
+        const legacyRemainingLife = remainingLifeToYears(existingDraft.remainingLife);
+
+        if (existingDraft.conditionRating || legacyConditionRating) {
+          setConditionRating((existingDraft.conditionRating ?? legacyConditionRating) as ConditionRating);
+        }
+
+        if (existingDraft.expectedRemainingLifeYears !== undefined) {
+          setExpectedRemainingLifeYears(String(existingDraft.expectedRemainingLifeYears));
+        } else if (legacyRemainingLife !== undefined) {
+          setExpectedRemainingLifeYears(legacyRemainingLife);
+        }
+
+        if (existingDraft.operationalStatus) setOperationalStatus(existingDraft.operationalStatus);
+        if (existingDraft.maintenanceRequired !== undefined) setMaintenanceRequired(boolToYesNo(Boolean(existingDraft.maintenanceRequired)));
+        if (existingDraft.replacementRequired !== undefined) setReplacementRequired(boolToYesNo(Boolean(existingDraft.replacementRequired)));
+        if (existingDraft.priorityLevel) setPriorityLevel(existingDraft.priorityLevel);
+        if (existingDraft.estimatedMaintenanceCost !== undefined) setEstimatedMaintenanceCost(String(existingDraft.estimatedMaintenanceCost));
+        if (existingDraft.estimatedReplacementCost !== undefined) setEstimatedReplacementCost(String(existingDraft.estimatedReplacementCost));
+        if (existingDraft.safetyConcern !== undefined) setSafetyConcern(boolToYesNo(Boolean(existingDraft.safetyConcern)));
+        if (existingDraft.issueDescription !== undefined) setIssueDescription(String(existingDraft.issueDescription));
+        else if (existingDraft.findingsSummary !== undefined) setIssueDescription(String(existingDraft.findingsSummary));
+        if (existingDraft.recommendedAction !== undefined) setRecommendedAction(String(existingDraft.recommendedAction));
+        else if (existingDraft.recommendedActions !== undefined) setRecommendedAction(String(existingDraft.recommendedActions));
+        if (existingDraft.generalNotes !== undefined) setGeneralNotes(String(existingDraft.generalNotes));
+        else if (existingDraft.comments !== undefined) setGeneralNotes(String(existingDraft.comments));
+
+        if (Array.isArray(existingDraft.photos)) {
+          setPhotos(
+            existingDraft.photos
+              .filter((photo: any) => photo?.uri)
+              .map((photo: any) => ({
+                local: { uri: photo.uri } as CapturedPhoto,
+                uploadStatus: photo.uploadStatus ?? (photo.remotePath ? 'uploaded' : 'failed'),
+                remotePath: photo.remotePath,
+              }))
+          );
+        }
       }
 
       setLoading(false);
@@ -159,93 +301,6 @@ export default function AuditorReportAssetAuditScreen() {
       mounted = false;
     };
   }, [reportAssetId]);
-
-  const buildDraftPayload = React.useCallback(
-    () => ({
-      condition,
-      criticality,
-      functional,
-      capacity,
-      remainingLife,
-      complianceRisk,
-      effectiveUse,
-      environmentImpact,
-      socialSignificance,
-      findingsSummary,
-      recommendedActions,
-      followUpOwner,
-      comments,
-      photoNotes,
-      photosCaptured: photosCaptured === 'Yes',
-      photos: photos.map((entry) => ({
-        uri: entry.local.uri,
-        remotePath: entry.remotePath,
-        uploadStatus: entry.uploadStatus,
-      })),
-    }),
-    [
-      condition,
-      criticality,
-      functional,
-      capacity,
-      remainingLife,
-      complianceRisk,
-      effectiveUse,
-      environmentImpact,
-      socialSignificance,
-      findingsSummary,
-      recommendedActions,
-      followUpOwner,
-      comments,
-      photoNotes,
-      photosCaptured,
-      photos,
-    ]
-  );
-
-  const persistDraftSnapshot = React.useCallback(() => {
-    if (!record) return;
-
-    saveAuditDraftSnapshot({
-      assetId: record.assetId,
-      assignmentId: record.reportAssetId,
-      findingsSummary,
-      recommendedActions,
-      followUpOwner,
-      comments,
-      photoNotes,
-      photosCaptured: photosCaptured === 'Yes',
-      photos: photos.map((entry) => ({
-        uri: entry.local.uri,
-        remotePath: entry.remotePath,
-        uploadStatus: entry.uploadStatus,
-      })),
-      updatedAt: new Date().toISOString(),
-    });
-  }, [record, findingsSummary, recommendedActions, followUpOwner, comments, photoNotes, photosCaptured, photos]);
-
-  const saveDraftAndReturn = React.useCallback(async () => {
-    if (!record || !reportAssetId) return;
-
-    setSavingDraft(true);
-    persistDraftSnapshot();
-
-    const ok = await saveAuditDraft({
-      reportAssetId,
-      assetId: record.assetId,
-      progressPct: 50,
-      draftPayload: buildDraftPayload(),
-    });
-
-    setSavingDraft(false);
-
-    if (!ok) {
-      Alert.alert('Draft not saved', 'The draft could not be saved. Please try again.');
-      return;
-    }
-
-    router.push((`/audit/reports/${record.reportId}` as any) as any);
-  }, [buildDraftPayload, persistDraftSnapshot, record, reportAssetId]);
 
   const handleAttachPhoto = React.useCallback(
     async (source: 'camera' | 'library') => {
@@ -257,12 +312,7 @@ export default function AuditorReportAssetAuditScreen() {
       try {
         const photo = source === 'camera' ? await captureFromCamera() : await pickFromLibrary();
 
-        if (!photo) {
-          setPhotoBusy(false);
-          return;
-        }
-
-        setPhotosCaptured('Yes');
+        if (!photo) return;
 
         setPhotos((prev) => [
           ...prev,
@@ -306,7 +356,7 @@ export default function AuditorReportAssetAuditScreen() {
             locationId: record.locationId,
             fileUrl,
             fileName: photo.fileName,
-            description: `Photo for asset ${record.assetCode}`,
+            description: `Photo for asset ${record.assetCode || record.assetName}`,
           });
         }
       } finally {
@@ -316,44 +366,81 @@ export default function AuditorReportAssetAuditScreen() {
     [photoBusy, record]
   );
 
+  const saveDraftAndReturn = React.useCallback(async () => {
+    if (!record || !reportAssetId) return;
+
+    setSavingDraft(true);
+
+    const ok = await saveAuditDraft({
+      reportAssetId,
+      assetId: record.assetId,
+      progressPct: calcProgress(draftPayload),
+      draftPayload,
+    });
+
+    setSavingDraft(false);
+
+    if (!ok) {
+      Alert.alert('Draft not saved', 'The draft could not be saved. Please try again.');
+      return;
+    }
+
+    router.push((`/audit/reports/${record.reportId}` as any) as any);
+  }, [draftPayload, record, reportAssetId]);
+
   const submitAudit = React.useCallback(async () => {
     if (!record || !reportAssetId) return;
 
-    if (!condition) {
-      Alert.alert('Condition required', 'Please select an asset condition before submitting.');
+    const expectedLife = toNumberOrNull(expectedRemainingLifeYears);
+    const maintenanceCost = toNumberOrNull(estimatedMaintenanceCost);
+    const replacementCost = toNumberOrNull(estimatedReplacementCost);
+
+    if (expectedRemainingLifeYears.trim() && expectedLife === null) {
+      Alert.alert('Check remaining life', 'Expected remaining life must be a number.');
       return;
     }
 
-    if (!findingsSummary.trim()) {
-      Alert.alert('Findings required', 'Please add a findings summary before submitting.');
+    if (estimatedMaintenanceCost.trim() && maintenanceCost === null) {
+      Alert.alert('Check maintenance cost', 'Estimated maintenance cost must be a valid number.');
       return;
+    }
+
+    if (estimatedReplacementCost.trim() && replacementCost === null) {
+      Alert.alert('Check replacement cost', 'Estimated replacement cost must be a valid number.');
+      return;
+    }
+
+    const failedUploads = photos.filter((entry) => entry.uploadStatus === 'failed').length;
+
+    if (failedUploads > 0) {
+      Alert.alert(
+        'Some photos are local only',
+        'One or more photos failed to upload. They will not be included in the submitted report until uploaded successfully.'
+      );
     }
 
     setSubmitting(true);
-    persistDraftSnapshot();
 
-    const uploadedPhoto = photos.find((entry) => entry.remotePath)?.remotePath ?? null;
-    const maintenanceRequired =
-      condition === 'Poor' || condition === 'Needs urgent attention' || complianceRisk === 'High' || functional === 'No';
-    const replacementRequired = condition === 'Needs urgent attention' || remainingLife === '0_1';
-    const priorityLevel = priorityFromInputs(criticality, condition, complianceRisk);
+    const photoUrls = photos
+      .map((entry) => entry.remotePath)
+      .filter((value): value is string => Boolean(value));
 
     const result = await submitConditionReport({
       reportAssetId,
       assetId: record.assetId,
-      findings: findingsSummary.trim(),
-      comments: comments.trim() || photoNotes.trim() || recommendedActions.trim(),
-      photoTaken: photosCaptured === 'Yes' || photos.length > 0,
-      photoReference: uploadedPhoto,
-      conditionRating: conditionToRating(condition),
-      expectedRemainingLifeYears: remainingLifeToYears(remainingLife),
-      operationalStatus: operationalStatus(functional),
-      maintenanceRequired,
-      replacementRequired,
+      conditionRating,
+      expectedRemainingLifeYears: expectedLife,
+      operationalStatus,
+      maintenanceRequired: yesNoToBool(maintenanceRequired),
+      replacementRequired: yesNoToBool(replacementRequired),
       priorityLevel,
-      safetyConcern: priorityLevel === 'Critical' || complianceRisk === 'High',
-      criticalAlert: priorityLevel === 'Critical',
-      recommendedAction: recommendedActions.trim() || null,
+      estimatedMaintenanceCost: maintenanceCost,
+      estimatedReplacementCost: replacementCost,
+      safetyConcern: yesNoToBool(safetyConcern),
+      issueDescription: issueDescription.trim() || null,
+      recommendedAction: recommendedAction.trim() || null,
+      generalNotes: generalNotes.trim() || null,
+      photoUrls,
     });
 
     setSubmitting(false);
@@ -365,20 +452,21 @@ export default function AuditorReportAssetAuditScreen() {
 
     router.replace((`/audit/reports/${record.reportId}` as any) as any);
   }, [
-    comments,
-    complianceRisk,
-    condition,
-    criticality,
-    findingsSummary,
-    functional,
-    persistDraftSnapshot,
-    photoNotes,
+    conditionRating,
+    estimatedMaintenanceCost,
+    estimatedReplacementCost,
+    expectedRemainingLifeYears,
+    generalNotes,
+    issueDescription,
+    maintenanceRequired,
+    operationalStatus,
     photos,
-    photosCaptured,
-    recommendedActions,
+    priorityLevel,
+    recommendedAction,
     record,
-    remainingLife,
+    replacementRequired,
     reportAssetId,
+    safetyConcern,
   ]);
 
   if (loading) {
@@ -415,7 +503,6 @@ export default function AuditorReportAssetAuditScreen() {
   const locationLabel = [record.locationName || record.locationId, record.roomName || record.roomId]
     .filter(Boolean)
     .join(' · ') || 'Location unknown';
-  const sectionTitleStyle = [t.text.title, { fontSize: 18, lineHeight: 24 }];
 
   return (
     <ScreenContainer>
@@ -435,234 +522,164 @@ export default function AuditorReportAssetAuditScreen() {
         }}
         showsVerticalScrollIndicator={false}>
         <SectionCard title="Condition report form" subtitle="Complete the universal audit fields for this assigned asset.">
-          <View style={{ gap: t.spacing.md }}>
-            <Text style={[t.text.title, { fontSize: 28, lineHeight: 34 }]}>{record.assetName}</Text>
-            <Text style={t.text.caption}>{record.assetCode || 'No asset code'}</Text>
-            <Text style={t.text.caption}>{locationLabel}</Text>
-            {[record.category, record.subCategory].filter(Boolean).length > 0 ? (
-              <Text style={t.text.caption}>{[record.category, record.subCategory].filter(Boolean).join(' · ')}</Text>
-            ) : null}
-          </View>
-
-          <View style={{ marginVertical: t.spacing.xl }}>
-            <View style={{ height: 1, backgroundColor: 'rgba(30,31,28,0.16)' }} />
-          </View>
-
-          <View style={{ gap: t.spacing.xl }}>
-            <View style={{ gap: t.spacing.md }}>
-              <Text style={sectionTitleStyle}>Asset condition</Text>
-
-              <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Condition</Text>
-                <SegmentedControl value={condition} onChange={(value) => setCondition(value)} options={conditionOptions} />
+          <View style={{ gap: t.spacing.lg }}>
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: 'rgba(30,31,28,0.10)',
+                borderRadius: t.radius.lg,
+                padding: t.spacing.md,
+                backgroundColor: 'rgba(0,74,38,0.04)',
+                gap: t.spacing.sm,
+              }}>
+              <View style={{ gap: 2 }}>
+                <Text style={[t.text.title, { fontSize: 20, lineHeight: 25 }]} numberOfLines={1}>
+                  {record.assetName}
+                </Text>
+                <Text style={t.text.caption} numberOfLines={1}>
+                  {record.assetCode || 'No asset code'} · {conditionName(conditionRating)}
+                </Text>
               </View>
 
-              <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Criticality</Text>
-                <SegmentedControl value={criticality} onChange={(value) => setCriticality(value)} options={criticalityOptions} />
-              </View>
-
-              <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Functional</Text>
-                <SegmentedControl
-                  value={functional}
-                  onChange={(value) => setFunctional(value)}
-                  options={[
-                    { label: 'Yes', value: 'Yes' },
-                    { label: 'No', value: 'No' },
-                  ]}
-                />
-              </View>
-
-              <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Capacity</Text>
-                <SegmentedControl
-                  value={capacity}
-                  onChange={(value) => setCapacity(value)}
-                  options={[
-                    { label: 'Under', value: 'Under' },
-                    { label: 'At', value: 'At' },
-                    { label: 'Over', value: 'Over' },
-                  ]}
-                />
-              </View>
-
-              <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Remaining life</Text>
-                <SegmentedControl
-                  value={remainingLife}
-                  onChange={(value) => setRemainingLife(value)}
-                  options={[
-                    { label: '0-1 yrs', value: '0_1' },
-                    { label: '1-3 yrs', value: '1_3' },
-                    { label: '3-5 yrs', value: '3_5' },
-                    { label: '5-10 yrs', value: '5_10' },
-                    { label: '10+ yrs', value: '10_plus' },
-                  ]}
-                />
-              </View>
-
-              <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Effective use</Text>
-                <SegmentedControl
-                  value={effectiveUse}
-                  onChange={(value) => setEffectiveUse(value)}
-                  options={[
-                    { label: 'Strong', value: 'Strong' },
-                    { label: 'Adequate', value: 'Adequate' },
-                    { label: 'Limited', value: 'Limited' },
-                  ]}
-                />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.md }}>
+                <View style={{ minWidth: 160, flex: 1 }}>
+                  <DetailText label="Location" value={locationLabel} />
+                </View>
+                <View style={{ minWidth: 140, flex: 1 }}>
+                  <DetailText label="Category" value={[record.category, record.subCategory].filter(Boolean).join(' · ')} />
+                </View>
+                <View style={{ minWidth: 120, flex: 1 }}>
+                  <DetailText label="Department" value={record.departmentName || record.departmentId} />
+                </View>
               </View>
             </View>
 
             <View style={{ gap: t.spacing.md }}>
-              <Text style={sectionTitleStyle}>Compliance and impact</Text>
-
               <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Compliance risk</Text>
-                <SegmentedControl
-                  value={complianceRisk}
-                  onChange={(value) => setComplianceRisk(value)}
-                  options={[
-                    { label: 'Low', value: 'Low' },
-                    { label: 'Medium', value: 'Medium' },
-                    { label: 'High', value: 'High' },
-                  ]}
-                />
+                <Text style={t.text.caption}>Condition rating</Text>
+                <SegmentedControl value={conditionRating} onChange={(value) => setConditionRating(value)} options={CONDITION_OPTIONS} />
               </View>
 
+              <FormField
+                label="Expected remaining life years"
+                value={expectedRemainingLifeYears}
+                onChangeText={setExpectedRemainingLifeYears}
+                placeholder="e.g. 5"
+              />
+
               <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Environmental impact</Text>
-                <SegmentedControl
-                  value={environmentImpact}
-                  onChange={(value) => setEnvironmentImpact(value)}
-                  options={[
-                    { label: 'Low', value: 'Low' },
-                    { label: 'Medium', value: 'Medium' },
-                    { label: 'High', value: 'High' },
-                  ]}
-                />
+                <Text style={t.text.caption}>Operational status</Text>
+                <SegmentedControl value={operationalStatus} onChange={(value) => setOperationalStatus(value)} options={OPERATIONAL_STATUS_OPTIONS} />
               </View>
 
               <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Social significance</Text>
-                <SegmentedControl
-                  value={socialSignificance}
-                  onChange={(value) => setSocialSignificance(value)}
-                  options={[
-                    { label: 'Low', value: 'Low' },
-                    { label: 'Medium', value: 'Medium' },
-                    { label: 'High', value: 'High' },
-                  ]}
-                />
+                <Text style={t.text.caption}>Maintenance required</Text>
+                <SegmentedControl value={maintenanceRequired} onChange={(value) => setMaintenanceRequired(value)} options={YES_NO_OPTIONS} />
               </View>
-            </View>
-
-            <View style={{ gap: t.spacing.md }}>
-              <Text style={sectionTitleStyle}>Findings and recommendations</Text>
-
-              <FormField
-                label="Findings summary"
-                value={findingsSummary}
-                onChangeText={setFindingsSummary}
-                multiline
-                placeholder="Summarise inspection findings..."
-              />
-
-              <FormField
-                label="Recommended actions"
-                value={recommendedActions}
-                onChangeText={setRecommendedActions}
-                multiline
-                placeholder="Recommended maintenance or replacement..."
-              />
-
-              <FormField
-                label="Follow-up owner"
-                value={followUpOwner}
-                onChangeText={setFollowUpOwner}
-                placeholder="Responsible department or staff member..."
-              />
-
-              <FormField
-                label="Comments"
-                value={comments}
-                onChangeText={setComments}
-                multiline
-                placeholder="Additional comments..."
-              />
-            </View>
-
-            <View style={{ gap: t.spacing.md }}>
-              <Text style={sectionTitleStyle}>Photo evidence</Text>
 
               <View style={{ gap: 6 }}>
-                <Text style={t.text.caption}>Photos captured</Text>
-                <SegmentedControl
-                  value={photosCaptured}
-                  onChange={(value) => setPhotosCaptured(value)}
-                  options={[
-                    { label: 'Yes', value: 'Yes' },
-                    { label: 'No', value: 'No' },
-                  ]}
-                />
+                <Text style={t.text.caption}>Replacement recommended</Text>
+                <SegmentedControl value={replacementRequired} onChange={(value) => setReplacementRequired(value)} options={YES_NO_OPTIONS} />
               </View>
 
-              <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
-                <Button
-                  label="Take photo"
-                  variant="secondary"
-                  onPress={() => handleAttachPhoto('camera')}
-                  disabled={photoBusy}
-                  style={{ flex: 1 }}
-                />
-
-                <Button
-                  label="Upload photo"
-                  variant="secondary"
-                  onPress={() => handleAttachPhoto('library')}
-                  disabled={photoBusy}
-                  style={{ flex: 1 }}
-                />
+              <View style={{ gap: 6 }}>
+                <Text style={t.text.caption}>Priority level</Text>
+                <SegmentedControl value={priorityLevel} onChange={(value) => setPriorityLevel(value)} options={PRIORITY_OPTIONS} />
               </View>
 
               <FormField
-                label="Photo notes"
-                value={photoNotes}
-                onChangeText={setPhotoNotes}
-                multiline
-                placeholder="Describe attached photos..."
+                label="Estimated maintenance cost"
+                value={estimatedMaintenanceCost}
+                onChangeText={setEstimatedMaintenanceCost}
+                placeholder="e.g. 250"
               />
 
-              {photos.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.spacing.md }}>
-                  {photos.map((entry) => (
-                    <View key={entry.local.uri} style={{ width: 120, gap: t.spacing.xs }}>
-                      <Image source={{ uri: entry.local.uri }} style={{ width: 120, height: 120, borderRadius: 12 }} />
+              <FormField
+                label="Estimated replacement cost"
+                value={estimatedReplacementCost}
+                onChangeText={setEstimatedReplacementCost}
+                placeholder="e.g. 1200"
+              />
 
-                      <Text
-                        style={[
-                          t.text.caption,
-                          { color: entry.uploadStatus === 'failed' ? '#B63E34' : t.colors.text.muted },
-                        ]}
-                        numberOfLines={1}>
-                        {entry.uploadStatus === 'pending'
-                          ? 'Uploading…'
-                          : entry.uploadStatus === 'uploaded'
-                            ? 'Uploaded'
-                            : 'Local only'}
-                      </Text>
+              <View style={{ gap: 6 }}>
+                <Text style={t.text.caption}>Safety concern</Text>
+                <SegmentedControl value={safetyConcern} onChange={(value) => setSafetyConcern(value)} options={YES_NO_OPTIONS} />
+              </View>
 
-                      <Pressable onPress={() => setPhotos((prev) => prev.filter((other) => other.local.uri !== entry.local.uri))}>
-                        <Text style={[t.text.caption, { fontSize: 11, color: '#B63E34' }]}>Remove</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : null}
+              <FormField
+                label="Issue description"
+                value={issueDescription}
+                onChangeText={setIssueDescription}
+                multiline
+                placeholder="Describe the issue or observation..."
+              />
 
-              {photoMessage ? <Text style={[t.text.caption, { color: t.colors.text.muted }]}>{photoMessage}</Text> : null}
+              <FormField
+                label="Recommended action"
+                value={recommendedAction}
+                onChangeText={setRecommendedAction}
+                multiline
+                placeholder="Recommended maintenance or action..."
+              />
+
+              <FormField
+                label="General notes"
+                value={generalNotes}
+                onChangeText={setGeneralNotes}
+                multiline
+                placeholder="General audit notes..."
+              />
+
+              <View style={{ gap: t.spacing.sm }}>
+                <Text style={t.text.caption}>Audit photos</Text>
+
+                <View style={{ flexDirection: 'row', gap: t.spacing.md }}>
+                  <Button
+                    label="Take photo"
+                    variant="secondary"
+                    onPress={() => handleAttachPhoto('camera')}
+                    disabled={photoBusy}
+                    style={{ flex: 1 }}
+                  />
+
+                  <Button
+                    label="Upload photo"
+                    variant="secondary"
+                    onPress={() => handleAttachPhoto('library')}
+                    disabled={photoBusy}
+                    style={{ flex: 1 }}
+                  />
+                </View>
+
+                {photos.length > 0 ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.spacing.md }}>
+                    {photos.map((entry) => (
+                      <View key={entry.local.uri} style={{ width: 120, gap: t.spacing.xs }}>
+                        <Image source={{ uri: entry.local.uri }} style={{ width: 120, height: 120, borderRadius: 12 }} />
+
+                        <Text
+                          style={[
+                            t.text.caption,
+                            { color: entry.uploadStatus === 'failed' ? '#B63E34' : t.colors.text.muted },
+                          ]}
+                          numberOfLines={1}>
+                          {entry.uploadStatus === 'pending'
+                            ? 'Uploading…'
+                            : entry.uploadStatus === 'uploaded'
+                              ? 'Uploaded'
+                              : 'Local only'}
+                        </Text>
+
+                        <Pressable onPress={() => setPhotos((prev) => prev.filter((other) => other.local.uri !== entry.local.uri))}>
+                          <Text style={[t.text.caption, { fontSize: 11, color: '#B63E34' }]}>Remove</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </ScrollView>
+                ) : null}
+
+                {photoMessage ? <Text style={[t.text.caption, { color: t.colors.text.muted }]}>{photoMessage}</Text> : null}
+              </View>
             </View>
 
             <View style={{ marginVertical: t.spacing.sm }}>
@@ -681,7 +698,7 @@ export default function AuditorReportAssetAuditScreen() {
               <Button
                 label={submitting ? 'Submitting...' : 'Submit audit'}
                 onPress={submitAudit}
-                disabled={savingDraft || submitting}
+                disabled={savingDraft || submitting || photoBusy}
                 style={{ flex: 1 }}
               />
             </View>
